@@ -26,20 +26,23 @@ jobs:
         run: dotnet build EasyTierHost.sln --nologo
       - name: Build deployment project
         run: dotnet build src/EasyTierHost.Deployment/EasyTierHost.Deployment.csproj --nologo
-      - name: Parse Windows deployment scripts
+      - name: Parse PowerShell deployment scripts
         shell: pwsh
         run: |
           $failed = $false
-          foreach ($file in Get-ChildItem scripts/windows/*.ps1) {
+          foreach ($file in Get-ChildItem scripts -Filter *.ps1 -Recurse) {
             $tokens = $null
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
             if ($errors.Count -gt 0) {
               $failed = $true
-              $errors | ForEach-Object { Write-Error "$($file.Name): $($_.Message)" }
+              $errors | ForEach-Object { Write-Error "$($file.FullName): $($_.Message)" }
             }
           }
           if ($failed) { exit 1 }
+      - name: Parse Linux deployment scripts
+        shell: bash
+        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run underlay integration smoke tests
