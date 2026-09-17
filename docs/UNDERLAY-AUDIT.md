@@ -8,6 +8,8 @@ Core 参数 `--underlay-source-ipv4` 安装不可变的进程级 IPv4 策略，�
 
 显式标记的维护路径包括 TCP/UDP 隧道监听和连接、UDP 打洞与地址发现、STUN UDP/TCP、网络地址探测，以及 Hickory TCP/UDP DNS。保护模式禁用系统 DNS 查询，使用原有公共 DNS 上游通过受保护 socket 查询；STUN 主机解析也统一进入该入口。UPnP 依赖库未受控，因此保护模式强制关闭 UPnP。
 
+保护模式下，Core 的 RPC 仍允许状态查询，但已经拒绝 `patch_config` 以及 RPC `run_network_instance` 新建/覆盖实例。这样默认路由接管后不能通过 RPC 动态重新打开未经审计的 transport、UPnP 或第二实例；配置变更必须回到 EasyTierHost，由 Host 先撤销路由/DNS、停止 Core，再重新捕获物理出口后启动。
+
 Host 在 `enableInternetGateway=true` 的 Client 上执行以下顺序：
 
 ```text
@@ -38,7 +40,6 @@ periodic endpoint refresh / physical-route reconcile / health probe
 
 ## 尚未满足的正式放行条件
 
-- 约束运行中的 RPC 新建/修改实例，避免重新启用未审计的 UPnP 或新 transport。
 - Windows/Linux 抓包确认 Seed、Relay、STUN、新打洞 endpoint 和维护 DNS 在默认路由提交前后都使用物理接口。
 - Seed + Gateway + 两个 Client 多节点验证 P2P、RTT、丢包、DNS、Internet 出口、重复地址与 endpoint 漂移。
 - Wi-Fi/有线切换、DHCP 换地址、休眠恢复、Gateway/Seed 重启和异常断电后的自动恢复。
