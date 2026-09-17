@@ -24,9 +24,9 @@ var profile = new NetworkProfile
     RpcPort = 15888,
     EnableInternetGateway = true
 };
-var args = EasyTierArgumentBuilder.Build(profile, "C:/private/core.toml", new CoreLaunchOptions { UnderlaySourceIpv4 = "192.168.1.9" }).ToArray();
-Check(args.Contains("--underlay-source-ipv4"), "Underlay argument missing");
-Check(args[^1] == "192.168.1.9", "Underlay source was not preserved");
+var coreArgs = EasyTierArgumentBuilder.Build(profile, "C:/private/core.toml", new CoreLaunchOptions { UnderlaySourceIpv4 = "192.168.1.9" }).ToArray();
+Check(coreArgs.Contains("--underlay-source-ipv4"), "Underlay argument missing");
+Check(coreArgs[^1] == "192.168.1.9", "Underlay source was not preserved");
 await Fails(() => Task.Run(() => EasyTierArgumentBuilder.Build(profile, "C:/private/core.toml", new CoreLaunchOptions { UnderlaySourceIpv4 = "10.10.0.11" })));
 
 var dir = Path.Combine(Path.GetTempPath(), "eth-integration-" + Guid.NewGuid().ToString("N"));
