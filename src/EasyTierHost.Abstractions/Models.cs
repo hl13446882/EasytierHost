@@ -5,6 +5,8 @@ namespace EasyTierHost.Abstractions;
 
 [JsonConverter(typeof(JsonStringEnumConverter<NodeRole>))]
 public enum NodeRole { Seed, Gateway, Dedicated, Client }
+[JsonConverter(typeof(JsonStringEnumConverter<ServerOsType>))]
+public enum ServerOsType { Windows, Linux }
 public enum GatewayState { PhysicalOnly, Capturing, UnderlayProtected, Probing, GatewayActive, RollingBack, Faulted }
 public sealed record NetworkProfile
 {
@@ -29,6 +31,41 @@ public sealed record NetworkProfile
 public sealed record CoreLaunchOptions
 {
     public string? UnderlaySourceIpv4 { get; init; }
+}
+
+/// <summary>SSH credentials are runtime-only. Password is deliberately excluded from JSON and ToString output.</summary>
+public sealed class RemoteHostCredential
+{
+    public required string Host { get; init; }
+    public int Port { get; init; } = 22;
+    public required string Username { get; init; }
+    public string? PrivateKeyPath { get; init; }
+    [JsonIgnore] public string? Password { get; init; }
+    public override string ToString() => $"{Username}@{Host}:{Port}";
+}
+
+public sealed record DeploymentRequest
+{
+    public required ServerOsType OsType { get; init; }
+    public required NodeRole Role { get; init; }
+    public required RemoteHostCredential Remote { get; init; }
+    public required string LocalPackageDirectory { get; init; }
+    public required string RemoteInstallDirectory { get; init; }
+    public required string LocalProfilePath { get; init; }
+    public required string RemoteProfilePath { get; init; }
+    public required string RemoteStateDirectory { get; init; }
+    public string ServiceName { get; init; } = "EasyTierHost";
+}
+
+public sealed record DeploymentResult(bool Success, string Code, string Message)
+{
+    public static DeploymentResult Ok(string message = "OK") => new(true, "OK", message);
+    public static DeploymentResult Fail(string code, string message) => new(false, code, message);
+}
+
+public sealed record RemoteCommandResult(int ExitCode, string StdOut, string StdErr)
+{
+    public bool Success => ExitCode == 0;
 }
 
 public static class OverlayAddressPlan
