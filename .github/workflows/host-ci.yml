@@ -24,3 +24,10 @@ jobs:
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run underlay integration smoke tests
         run: dotnet run --project tests/EasyTierHost.IntegrationTests
+      - name: Run EasyTier DHCP and underlay tests
+        shell: pwsh
+        working-directory: EasyTier-2.6.4
+        run: |
+          $env:PATH = "$PWD/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
+          cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
+          cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun
