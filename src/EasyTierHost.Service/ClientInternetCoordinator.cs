@@ -10,7 +10,6 @@ public sealed record ClientOverlayAdapter(int InterfaceIndex, string Name, strin
 
 public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteController controller, IGatewayProbe probe, string stateDirectory)
 {
-    private readonly UnderlayRouteProtector endpoints = new() { GracePeriod = TimeSpan.FromSeconds(120) };
     private string StatusPath => Path.Combine(stateDirectory, "client-gateway-status.json");
 
     public Task RecoverAsync(CancellationToken ct) => controller.RecoverAsync(ct);
@@ -46,6 +45,7 @@ public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteCont
         if (profile.Role != NodeRole.Client || !profile.EnableInternetGateway) throw new HostException("ETH301", "Internet coordinator requires an enabled Client profile");
         if (process.UnderlaySourceIpv4 != launchPhysical.PhysicalIpv4) throw new HostException("ETH301", "Core underlay binding does not match the captured physical IPv4");
 
+        var endpointProtector = new UnderlayRouteProtector { GracePeriod = TimeSpan.FromSeconds(120) };
         ClientOverlayAdapter? overlay = null;
         CoreNodeStatus? node = null;
         IReadOnlyList<CorePeerStatus> peers = [];
@@ -82,7 +82,7 @@ public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteCont
         }
 
         var active = ActiveEndpoints(profile, peers);
-        var protectedEndpoints = endpoints.Update(active);
+        var protectedEndpoints = endpointProtector.Update(active);
         var context = new GatewayContext(overlay!.InterfaceIndex, overlay.Ip, protectedEndpoints.ToArray(), process.UnderlaySourceIpv4 == launchPhysical.PhysicalIpv4);
         try
         {
@@ -121,7 +121,7 @@ public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteCont
                 peers = await reader.ReadPeersAsync(ct);
                 if (peers.Any(peer => peer.PeerId != node.PeerId && peer.OverlayIp == overlay.Ip)) throw new HostException("ETH102", "Duplicate client address detected");
 
-                protectedEndpoints = endpoints.Update(ActiveEndpoints(profile, peers));
+                protectedEndpoints = endpointProtector.Update(ActiveEndpoints(profile, peers));
                 await controller.UpdateProtectionAsync(protectedEndpoints, ct);
                 await controller.ReconcileAsync(ct);
                 if (controller.State != GatewayState.GatewayActive) throw new HostException("ETH301", "Gateway route ownership changed; network rolled back");
