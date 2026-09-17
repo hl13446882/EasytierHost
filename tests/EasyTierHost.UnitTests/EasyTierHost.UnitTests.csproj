@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/EasyTierHost.Service/EasyTierHost.Service.csproj" /></ItemGroup>
+</Project>

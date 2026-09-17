@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>easytier-host</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EasyTierHost.Network/EasyTierHost.Network.csproj" />
+    <ProjectReference Include="../EasyTierHost.Gateway/EasyTierHost.Gateway.csproj" />
+  </ItemGroup>
+</Project>

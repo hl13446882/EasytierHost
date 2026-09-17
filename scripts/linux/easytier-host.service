@@ -1,0 +1,19 @@
+[Unit]
+Description=EasyTierHost overlay preview
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/opt/easytier-host/easytier-host run /etc/easytier-host/network.json /var/lib/easytier-host
+WorkingDirectory=/opt/easytier-host
+Restart=on-failure
+RestartSec=5
+UMask=0077
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

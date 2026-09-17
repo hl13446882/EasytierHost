@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "networkName": "company-overlay",
+  "secretFile": "network.secret",
+  "role": "Gateway",
+  "seedPhysicalIp": "192.0.2.10",
+  "port": 11010,
+  "corePath": "easytier-core",
+  "cliPath": "easytier-cli",
+  "rpcPort": 15888,
+  "dnsUpstreams": [],
+  "allowPublicDnsFallback": false
+}

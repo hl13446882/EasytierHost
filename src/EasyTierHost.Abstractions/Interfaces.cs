@@ -1,0 +1,26 @@
+namespace EasyTierHost.Abstractions;
+
+public interface IRouteApi
+{
+    Task<RouteSnapshot> CaptureAsync(CancellationToken ct);
+    Task<IReadOnlyList<RouteEntry>> ListAsync(CancellationToken ct);
+    Task AddAsync(RouteEntry route, CancellationToken ct);
+    Task DeleteAsync(RouteEntry route, CancellationToken ct);
+}
+public interface IDnsController
+{
+    Task ApplyAsync(RouteSnapshot snapshot, CancellationToken ct);
+    Task RestoreAsync(RouteSnapshot snapshot, CancellationToken ct);
+}
+public interface IGatewayProbe
+{
+    Task<bool> CheckAsync(GatewayContext context, CancellationToken ct);
+}
+public interface IEasyTierProcessManager : IAsyncDisposable
+{
+    int? ProcessId { get; }
+    bool IsRunning { get; }
+    Task StartAsync(NetworkProfile profile, string configurationPath, CancellationToken ct);
+    Task StopAsync(CancellationToken ct);
+    Task<int> WaitForExitAsync(CancellationToken ct);
+}

@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><ProjectReference Include="../EasyTierHost.Abstractions/EasyTierHost.Abstractions.csproj" /></ItemGroup>
+</Project>

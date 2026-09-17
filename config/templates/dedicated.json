@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "networkName": "company-overlay",
+  "secretFile": "network.secret",
+  "role": "Dedicated",
+  "seedPhysicalIp": "192.0.2.10",
+  "dedicatedIndex": 3,
+  "port": 11010,
+  "corePath": "easytier-core",
+  "cliPath": "easytier-cli",
+  "rpcPort": 15888
+}
