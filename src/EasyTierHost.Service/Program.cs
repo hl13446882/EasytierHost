@@ -12,6 +12,9 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        if (OperatingSystem.IsWindows() && args.Length == 3 && args[0].Equals("service", StringComparison.OrdinalIgnoreCase))
+            return WindowsServiceHost.Run("EasyTierHost", ct => RunServiceAsync(args[1], args[2], ct));
+
         using var stop = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
         using var term = OperatingSystem.IsLinux() ? System.Runtime.InteropServices.PosixSignalRegistration.Create(System.Runtime.InteropServices.PosixSignal.SIGTERM, context => { context.Cancel = true; stop.Cancel(); }) : null;
@@ -19,7 +22,7 @@ public static class Program
         {
             if (args.Length == 0 || args[0] == "help")
             {
-                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  status <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
+                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  service <network.json> <state-directory>  (Windows SCM only)\n  status <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
                 return 0;
             }
             if (args[0] == "set-secret" && args.Length == 2)
@@ -56,6 +59,23 @@ public static class Program
             Console.Error.WriteLine(ex is HostException ? ex.Message : $"Failure: {ex.GetType().Name}"); return 1;
         }
     }
+
+    private static async Task<int> RunServiceAsync(string profilePath, string stateDirectory, CancellationToken ct)
+    {
+        try
+        {
+            var profile = await ConfigurationStore.LoadAsync(profilePath, ct);
+            await RunAsync(profile, Path.GetFullPath(stateDirectory), ct);
+            return 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return 0; }
+        catch
+        {
+            // Runtime state/journals contain the actionable status without risking secret-bearing exception text.
+            return 1;
+        }
+    }
+
     private static string ReadPassword()
     {
         Console.Write("Network secret: "); var secret = new System.Text.StringBuilder();
