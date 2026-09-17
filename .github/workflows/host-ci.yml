@@ -44,6 +44,8 @@ jobs:
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run underlay integration smoke tests
         run: dotnet run --project tests/EasyTierHost.IntegrationTests
+      - name: Run deployment safety tests
+        run: dotnet run --project tests/EasyTierHost.DeploymentTests
       - name: Install Protocol Buffers compiler
         shell: pwsh
         run: |
