@@ -41,6 +41,7 @@ public sealed class GatewayRouteController(IRouteApi api, IDnsController dns, IG
             State = GatewayState.Capturing;
             var snapshot = await api.CaptureAsync(ct);
             if (snapshot.PhysicalInterfaceIndex == context.OverlayInterfaceIndex) throw new HostException("ETH301", "Physical and overlay interfaces must differ");
+            snapshot = await dns.CaptureAsync(snapshot, context, ct);
             journal = new(snapshot, [], false);
             await SaveAsync(ct);
             foreach (var route in RoutePlanner.Protect(snapshot, context.Endpoints)) await AddOwnedAsync(route, ct);

@@ -105,15 +105,18 @@ public static class DnsMessage
         }
         catch (IOException) { return false; }
     }
-    public static async Task<byte[]> ExchangeAsync(IPEndPoint endpoint, byte[] query, bool tcp, CancellationToken ct)
+    public static async Task<byte[]> ExchangeAsync(IPEndPoint endpoint, byte[] query, bool tcp, CancellationToken ct, IPAddress? source = null)
     {
         if (!tcp)
         {
-            using var socket = new UdpClient(endpoint.AddressFamily); socket.Connect(endpoint);
+            using var socket = new UdpClient(endpoint.AddressFamily);
+            if (source is not null) socket.Client.Bind(new IPEndPoint(source, 0));
+            socket.Connect(endpoint);
             await socket.SendAsync(query, ct);
             return (await socket.ReceiveAsync(ct)).Buffer;
         }
         using var client = new TcpClient(endpoint.AddressFamily);
+        if (source is not null) client.Client.Bind(new IPEndPoint(source, 0));
         await client.ConnectAsync(endpoint.Address, endpoint.Port, ct);
         await WriteFrameAsync(client.GetStream(), query, ct);
         return await ReadFrameAsync(client.GetStream(), ct);

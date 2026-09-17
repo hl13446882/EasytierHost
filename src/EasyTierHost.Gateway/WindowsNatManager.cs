@@ -41,11 +41,34 @@ public sealed class WindowsNatManager(ICommandRunner runner) : IGatewayPlatform
             catch (Exception ex) { errors.Add(ex); }
         if (errors.Count > 0) throw new AggregateException(errors);
     }
-    public async Task CreateNatAsync(GatewayPlatformSnapshot s, CancellationToken ct) => await RunAsync($"if (@(Get-NetNat).Count -ne 0) {{ throw 'Existing NAT appeared' }}; New-NetNat -Name {Q(s.ResourceName)} -InternalIPInterfaceAddressPrefix '{OverlayAddressPlan.Cidr}' -ExternalIPInterfaceAddressPrefix {Q(s.Physical.PhysicalIpv4 + "/32")} | Out-Null", ct);
-    public async Task RemoveNatAsync(GatewayPlatformSnapshot s, CancellationToken ct) => await RunAsync($"$n=@(Get-NetNat | Where-Object Name -eq {Q(s.ResourceName)}); if ($n.Count -gt 0) {{ if ($n[0].InternalIPInterfaceAddressPrefix -ne '{OverlayAddressPlan.Cidr}' -or $n[0].ExternalIPInterfaceAddressPrefix -ne {Q(s.Physical.PhysicalIpv4 + "/32")}) {{ throw 'NAT ownership mismatch' }}; $n | Remove-NetNat -Confirm:$false }}", ct);
+    public async Task CreateNatAsync(GatewayPlatformSnapshot s, CancellationToken ct)
+    {
+        await RunAsync($"if (@(Get-NetNat).Count -ne 0) {{ throw 'Existing NAT appeared' }}; New-NetNat -Name {Q(s.ResourceName)} -InternalIPInterfaceAddressPrefix '{OverlayAddressPlan.Cidr}' -ExternalIPInterfaceAddressPrefix {Q(s.Physical.PhysicalIpv4 + "/32")} | Out-Null", ct);
+        foreach (var protocol in new[] { "TCP", "UDP" })
+            await RunAsync($"New-NetFirewallRule -Name {Q(s.ResourceName + "_dns_" + protocol)} -DisplayName {Q(s.ResourceName + " DNS " + protocol)} -Description {Q("EasyTierHost:" + s.OwnerToken)} -Direction Inbound -Action Allow -Profile Any -Protocol {protocol} -LocalPort 53 -LocalAddress '{OverlayAddressPlan.Gateway}' -RemoteAddress '{OverlayAddressPlan.Cidr}' -InterfaceAlias {Q(s.Overlay.Name)} -Program {Q(Environment.ProcessPath ?? throw new IOException("Missing process path"))} | Out-Null", ct);
+    }
+    public async Task RemoveNatAsync(GatewayPlatformSnapshot s, CancellationToken ct)
+    {
+        var errors = new List<Exception>();
+        foreach (var protocol in new[] { "TCP", "UDP" })
+            try
+            {
+                await RunAsync($"$r=@(Get-NetFirewallRule | Where-Object Name -eq {Q(s.ResourceName + "_dns_" + protocol)}); if ($r.Count -gt 0) {{ if ($r[0].Description -ne {Q("EasyTierHost:" + s.OwnerToken)}) {{ throw 'Firewall ownership mismatch' }}; $r | Remove-NetFirewallRule }}", ct);
+            }
+            catch (Exception ex) { errors.Add(ex); }
+        try { await RunAsync($"$n=@(Get-NetNat | Where-Object Name -eq {Q(s.ResourceName)}); if ($n.Count -gt 0) {{ if ($n[0].InternalIPInterfaceAddressPrefix -ne '{OverlayAddressPlan.Cidr}' -or $n[0].ExternalIPInterfaceAddressPrefix -ne {Q(s.Physical.PhysicalIpv4 + "/32")}) {{ throw 'NAT ownership mismatch' }}; $n | Remove-NetNat -Confirm:$false }}", ct); }
+        catch (Exception ex) { errors.Add(ex); }
+        if (errors.Count > 0) throw new AggregateException(errors);
+    }
     public async Task<bool> VerifyAsync(GatewayPlatformSnapshot s, CancellationToken ct)
     {
         var result = await RunAsync($"$n=@(Get-NetNat | Where-Object {{ $_.Name -eq {Q(s.ResourceName)} -and $_.InternalIPInterfaceAddressPrefix -eq '{OverlayAddressPlan.Cidr}' -and $_.ExternalIPInterfaceAddressPrefix -eq {Q(s.Physical.PhysicalIpv4 + "/32")} -and $_.Active }}); $ready=$n.Count -eq 1; " + string.Join("; ", s.Forwarding.Select(e => $"$a=Get-NetAdapter -InterfaceIndex {e.Index} -IncludeHidden; $i=Get-NetIPInterface -InterfaceIndex {e.Index} -AddressFamily IPv4; $ready=$ready -and ($a.InterfaceGuid.ToString() -eq {Q(e.Identity)}) -and ($i.Forwarding -eq 'Enabled')")) + "; ConvertTo-Json -Compress $ready", ct);
-        return JsonSerializer.Deserialize<bool>(result);
+        if (!JsonSerializer.Deserialize<bool>(result)) return false;
+        foreach (var protocol in new[] { "TCP", "UDP" })
+        {
+            var exists = await RunAsync($"$rules=@(Get-NetFirewallRule | Where-Object {{ $_.Name -eq {Q(s.ResourceName + "_dns_" + protocol)} -and $_.Description -eq {Q("EasyTierHost:" + s.OwnerToken)} -and $_.Enabled -eq 'True' -and $_.Action -eq 'Allow' }}); ConvertTo-Json -Compress ($rules.Count -eq 1)", ct);
+            if (!JsonSerializer.Deserialize<bool>(exists)) return false;
+        }
+        return true;
     }
 }

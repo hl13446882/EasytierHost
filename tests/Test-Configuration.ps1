@@ -1,3 +1,4 @@
+param([string]$CorePath = '')
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $testDirectory = Join-Path $workspace ('tests/.configuration-' + [Guid]::NewGuid().ToString('N'))
@@ -12,6 +13,10 @@ try {
         Copy-Item -LiteralPath (Join-Path $workspace "config/templates/$role.json") -Destination $profile
         dotnet $hostDll configure $profile (Join-Path $testDirectory "$role.toml")
         if ($LASTEXITCODE) { throw "$role generation failed" }
+        if ($CorePath) {
+            & $CorePath --check-config --config-file (Join-Path $testDirectory "$role.toml") | Out-Null
+            if ($LASTEXITCODE) { throw "$role Core config validation failed" }
+        }
     }
     @'
 import sys, tomllib

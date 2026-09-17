@@ -26,7 +26,7 @@ var tests = new (string Name, Func<Task> Test)[]
     ("Protected secret round trip", SecretRoundTrip),
 };
 var failures = 0;
-var allTests = tests.Concat(GatewayTests.Cases).ToArray();
+var allTests = tests.Concat(GatewayTests.Cases).Concat(NetworkExtensionTests.Cases).ToArray();
 foreach (var (name, test) in allTests)
 {
     try { await test(); Console.WriteLine($"PASS {name}"); }

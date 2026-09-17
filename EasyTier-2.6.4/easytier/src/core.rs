@@ -111,6 +111,10 @@ struct Cli {
     )]
     config_file: Option<Vec<PathBuf>>,
 
+    /// Bind IPv4 TCP/UDP maintenance sockets to this physical source (single-network Host mode).
+    #[arg(long)]
+    underlay_source_ipv4: Option<std::net::Ipv4Addr>,
+
     #[arg(
         long,
         env = "ET_CONFIG_DIR",
@@ -1348,7 +1352,14 @@ fn win_service_main(arg: Vec<std::ffi::OsString>) {
     win_service_event_loop(stop_notify_recv, cli, status_handle);
 }
 
-async fn run_main(cli: Cli) -> anyhow::Result<()> {
+async fn run_main(mut cli: Cli) -> anyhow::Result<()> {
+    if let Some(source) = cli.underlay_source_ipv4 {
+        anyhow::ensure!(cli.config_server.is_none() && cli.config_dir.is_none() && cli.config_file.as_ref().is_some_and(|files| files.len() == 1), "underlay binding requires exactly one static config file");
+        anyhow::ensure!(!cfg!(any(feature = "quic", feature = "wireguard", feature = "websocket", feature = "faketcp")), "underlay binding currently supports the TCP/UDP Host build only");
+        crate::tunnel::underlay_policy::initialize(source)?;
+        // UPnP dependencies create their own sockets outside the binding policy.
+        cli.network_options.disable_upnp = Some(true);
+    }
     defer!(dump_profile(0););
     log::init(&cli.logging_options, true)?;
 
@@ -1456,6 +1467,12 @@ async fn run_main(cli: Cli) -> anyhow::Result<()> {
             crate_cli_network = false;
             control.set_read_only(true);
             control.set_no_delete(true);
+        }
+
+        if crate::tunnel::underlay_policy::is_enabled() {
+            let mut flags = cfg.get_flags();
+            flags.disable_upnp = true;
+            cfg.set_flags(flags);
         }
 
         log::info!(

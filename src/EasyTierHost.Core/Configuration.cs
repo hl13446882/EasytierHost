@@ -44,11 +44,12 @@ public static class EasyTierConfigBuilder
             });
         return result.Append('"').ToString();
     }
-    public static string Build(NetworkProfile p, string secret)
+    public static string Build(NetworkProfile p, string secret, Guid? instanceId = null)
     {
         NetworkProfileValidator.Validate(p);
         if (string.IsNullOrWhiteSpace(secret)) throw new HostException("ETH003", "Network secret is empty");
         var lines = new List<string> { $"instance_name = {Quote("EasyTierHost")}", $"dhcp = {(p.Role == NodeRole.Client ? "true" : "false")}", $"listeners = [\"tcp://0.0.0.0:{p.Port}\", \"udp://0.0.0.0:{p.Port}\"]" };
+        if (instanceId is not null) lines.Add($"instance_id = \"{instanceId:D}\"");
         if (p.Role is NodeRole.Gateway or NodeRole.Dedicated)
             lines.Add($"ipv4 = \"10.10.0.{(p.Role == NodeRole.Gateway ? 1 : p.DedicatedIndex)}/16\"");
         if (p.Role == NodeRole.Client) lines.Add("exit_nodes = [\"10.10.0.1\"]");

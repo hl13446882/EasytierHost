@@ -62,10 +62,10 @@ public static class Program
         while (true) { var key = Console.ReadKey(true); if (key.Key == ConsoleKey.Enter) break; if (key.Key == ConsoleKey.Backspace) { if (secret.Length > 0) secret.Length--; } else if (!char.IsControl(key.KeyChar)) secret.Append(key.KeyChar); }
         Console.WriteLine(); return secret.ToString();
     }
-    private static async Task WriteConfigAsync(NetworkProfile profile, string path, CancellationToken ct)
+    private static async Task WriteConfigAsync(NetworkProfile profile, string path, CancellationToken ct, Guid? instanceId = null)
     {
         var secret = await SecretProvider.ReadAsync(profile.SecretFile, ct);
-        var contents = EasyTierConfigBuilder.Build(profile, secret);
+        var contents = EasyTierConfigBuilder.Build(profile, secret, instanceId);
         var folder = Path.GetDirectoryName(Path.GetFullPath(path))!;
         // Restrict a dedicated directory, never an arbitrary existing parent.
         if (!Directory.Exists(folder)) await SecretProvider.SecureDirectoryAsync(folder, ct);
@@ -97,7 +97,8 @@ public static class Program
         if (File.Exists(Path.Combine(state, "route-journal.json"))) throw new HostException("ETH302", "A route recovery journal exists; recover it before starting");
         var gateway = new GatewayCoordinator(RouteApi(new CommandRunner()), OperatingSystem.IsWindows() ? new WindowsNatManager(new CommandRunner()) : new LinuxNatManager(new CommandRunner()), state);
         await gateway.RecoverAsync(ct);
-        await WriteConfigAsync(p, config, ct);
+        var instanceId = Guid.NewGuid();
+        await WriteConfigAsync(p, config, ct, instanceId);
         await using var manager = new EasyTierProcessManager();
         var failures = new Queue<DateTimeOffset>();
         try
@@ -115,7 +116,7 @@ public static class Program
                     var exitTask = manager.WaitForExitAsync(iteration.Token);
                     if (p.Role == NodeRole.Gateway)
                     {
-                        gatewayTask = gateway.RunAsync(p, manager, iteration.Token);
+                        gatewayTask = gateway.RunAsync(p, manager, instanceId, iteration.Token);
                         await await Task.WhenAny(exitTask, gatewayTask);
                     }
                     code = await exitTask;
@@ -156,15 +157,13 @@ public static class Program
         RouteSnapshot? physical = null; string? captureError = null;
         try { physical = await RouteApi(runner).CaptureAsync(ct); } catch (Exception ex) { captureError = ex.GetType().Name; }
         var overlay = NetworkInterface.GetAllNetworkInterfaces().SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address).Where(OverlayAddressPlan.IsOverlay).Select(a => a.ToString()).ToArray();
-        Console.WriteLine(JsonSerializer.Serialize(new { BuildId = "0.2.0", CoreBase = "2.6.4", Schema = p.SchemaVersion, Role = p.Role.ToString(), p.SeedPhysicalIp, Physical = physical, OverlayAddresses = overlay, CaptureError = captureError, GatewayState = "DisabledPendingUnderlayAudit" }, ConfigurationStore.Json));
+        Console.WriteLine(JsonSerializer.Serialize(new { BuildId = "0.2.0", CoreBase = "2.6.4", Schema = p.SchemaVersion, Role = p.Role.ToString(), p.SeedPhysicalIp, Physical = physical, OverlayAddresses = overlay, CaptureError = captureError, GatewayState = p.Role == NodeRole.Gateway ? "UseGatewayStatusFileForRuntimeState" : "InternetActivationDisabledPendingUnderlayAudit" }, ConfigurationStore.Json));
     }
     private static async Task RunDnsAsync(NetworkProfile p, CancellationToken ct)
     {
         if (!NetworkInterface.GetAllNetworkInterfaces().SelectMany(n => n.GetIPProperties().UnicastAddresses).Any(a => a.Address.ToString() == OverlayAddressPlan.Gateway)) throw new HostException("ETH201", "Gateway TUN address is not ready");
-        var upstreams = p.DnsUpstreams;
-        if (upstreams.Length == 0) upstreams = (await RouteApi(new CommandRunner()).CaptureAsync(ct)).OriginalDnsServers.Where(s => IPAddress.TryParse(s, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !OverlayAddressPlan.IsOverlay(ip) && !IPAddress.IsLoopback(ip)).ToArray();
-        if (upstreams.Length == 0 && p.AllowPublicDnsFallback) upstreams = ["1.1.1.1", "8.8.8.8"];
-        if (upstreams.Length == 0) throw new HostException("ETH202", "No physical DNS upstream configured");
-        await new DnsForwarderService(new(IPAddress.Parse(OverlayAddressPlan.Gateway), 53), upstreams.Select(ip => new IPEndPoint(IPAddress.Parse(ip), 53)).ToArray()).RunAsync(ct);
+        var physical = await RouteApi(new CommandRunner()).CaptureAsync(ct);
+        var upstreams = GatewayCoordinator.ResolveUpstreams(p, physical);
+        await new DnsForwarderService(new(IPAddress.Parse(OverlayAddressPlan.Gateway), 53), upstreams).RunAsync(ct);
     }
 }

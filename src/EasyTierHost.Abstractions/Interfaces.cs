@@ -9,6 +9,7 @@ public interface IRouteApi
 }
 public interface IDnsController
 {
+    Task<RouteSnapshot> CaptureAsync(RouteSnapshot snapshot, GatewayContext context, CancellationToken ct) => Task.FromResult(snapshot);
     Task ApplyAsync(RouteSnapshot snapshot, CancellationToken ct);
     Task RestoreAsync(RouteSnapshot snapshot, CancellationToken ct);
 }

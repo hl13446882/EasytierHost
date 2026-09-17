@@ -43,7 +43,7 @@ use crate::tunnel::{FromUrl, IpScheme, TunnelScheme, matches_scheme};
 use anyhow::Context;
 use rand::Rng;
 use socket2::Protocol;
-use tokio::{net::UdpSocket, task::JoinSet, time::timeout};
+use tokio::{task::JoinSet, time::timeout};
 use url::Host;
 
 pub const DIRECT_CONNECTOR_SERVICE_ID: u32 = 1;
@@ -203,7 +203,7 @@ impl DirectConnectorManagerData {
         remote_url: &url::Url,
     ) -> Result<(PeerId, PeerConnId), Error> {
         let local_socket = Arc::new(
-            UdpSocket::bind("[::]:0")
+            crate::tunnel::underlay_policy::bind_udp("[::]:0")
                 .await
                 .with_context(|| format!("failed to bind local socket for {}", remote_url))?,
         );
@@ -251,7 +251,7 @@ impl DirectConnectorManagerData {
         let local_socket = {
             let _g = self.global_ctx.net_ns.guard();
             Arc::new(
-                UdpSocket::bind("0.0.0.0:0")
+                crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0")
                     .await
                     .with_context(|| format!("failed to bind local socket for {}", remote_url))?,
             )

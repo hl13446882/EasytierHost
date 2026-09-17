@@ -35,17 +35,34 @@ public sealed class GatewayCoordinator(IRouteApi routes, IGatewayPlatform platfo
         if (upstreams.Count == 0) throw new HostException("ETH202", "No physical DNS upstream configured");
         return upstreams.ToArray();
     }
-    public async Task RunAsync(NetworkProfile profile, IEasyTierProcessManager process, CancellationToken ct)
+    public async Task RunAsync(NetworkProfile profile, IEasyTierProcessManager process, Guid instanceId, CancellationToken ct)
     {
         GatewayAdapter? overlay = null;
+        var reader = new CoreStatusReader(new CommandRunner(), profile);
         using (var ready = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             ready.CancelAfter(TimeSpan.FromSeconds(45));
             try
             {
-                while ((overlay = FindAdapter(profile)) is null)
+                while (true)
                 {
                     if (!process.IsRunning) throw new HostException("ETH201", "Core exited before gateway TUN was ready");
+                    overlay = FindAdapter(profile);
+                    if (overlay is not null)
+                    {
+                        try
+                        {
+                            var node = await reader.ReadNodeAsync(ready.Token);
+                            if (node.InstanceId == instanceId && node.OverlayIp == OverlayAddressPlan.Gateway)
+                            {
+                                var peers = await reader.ReadPeersAsync(ready.Token);
+                                if (peers.Any(peer => peer.PeerId != node.PeerId && peer.OverlayIp == OverlayAddressPlan.Gateway))
+                                    throw new HostException("ETH102", "Another peer already owns the gateway address");
+                                if (peers.Count > 0) break;
+                            }
+                        }
+                        catch (Exception ex) when (ex is InvalidOperationException or IOException or OperationCanceledException or System.Text.Json.JsonException) { ready.Token.ThrowIfCancellationRequested(); }
+                    }
                     await Task.Delay(250, ready.Token);
                 }
             }
@@ -63,6 +80,10 @@ public sealed class GatewayCoordinator(IRouteApi routes, IGatewayPlatform platfo
             {
                 await Task.Delay(TimeSpan.FromSeconds(10), ct);
                 var current = await routes.CaptureAsync(ct);
+                var node = await reader.ReadNodeAsync(ct);
+                if (node.InstanceId != instanceId || node.OverlayIp != OverlayAddressPlan.Gateway) throw new HostException("ETH201", "Gateway core instance changed");
+                var peers = await reader.ReadPeersAsync(ct);
+                if (peers.Any(peer => peer.PeerId != node.PeerId && peer.OverlayIp == OverlayAddressPlan.Gateway)) throw new HostException("ETH102", "Duplicate gateway address detected");
                 if (!process.IsRunning || FindAdapter(profile)?.Identity != overlay.Identity || current.PhysicalInterfaceIndex != physical.PhysicalInterfaceIndex || current.PhysicalIpv4 != physical.PhysicalIpv4 || current.PhysicalGateway != physical.PhysicalGateway)
                     throw new HostException("ETH201", "Gateway network changed; rebuilding gateway");
                 if (!await bootstrapper.CheckAsync(ct)) throw new HostException("ETH202", "Gateway health check failed");

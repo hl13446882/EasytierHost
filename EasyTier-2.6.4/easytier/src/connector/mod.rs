@@ -124,7 +124,7 @@ async fn easytier_managed_ipv6_source_for_dst(
 ) -> Result<Option<Ipv6Addr>, Error> {
     let socket = {
         let _g = global_ctx.net_ns.guard();
-        tokio::net::UdpSocket::bind("[::]:0").await?
+        crate::tunnel::underlay_policy::bind_udp("[::]:0").await?
     };
     socket.connect(SocketAddr::V6(dst_addr)).await?;
 

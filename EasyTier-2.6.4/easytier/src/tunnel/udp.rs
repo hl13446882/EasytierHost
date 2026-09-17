@@ -153,7 +153,7 @@ pub async fn send_v6_hole_punch_packet(
     listener_port: u16,
     dst_addr: SocketAddrV6,
 ) -> Result<(), TunnelError> {
-    let local_socket = UdpSocket::bind("[::1]:0").await?;
+    let local_socket = crate::tunnel::underlay_policy::bind_udp("[::1]:0").await?;
     let udp_packet = new_v6_hole_punch_packet(&dst_addr);
     let remote_addr = format!("[::1]:{}", listener_port)
         .parse::<SocketAddr>()
@@ -168,7 +168,7 @@ pub async fn send_v4_hole_punch_packet(
     listener_port: u16,
     dst_addr: SocketAddrV4,
 ) -> Result<(), TunnelError> {
-    let local_socket = UdpSocket::bind("127.0.0.1:0").await?;
+    let local_socket = crate::tunnel::underlay_policy::bind_udp("127.0.0.1:0").await?;
     let udp_packet = new_v4_hole_punch_packet(&dst_addr);
     let remote_addr = format!("127.0.0.1:{}", listener_port)
         .parse::<SocketAddr>()
@@ -229,9 +229,9 @@ async fn respond_stun_packet(
     } else {
         // send from a new udp socket
         let socket = if addr.is_ipv4() {
-            UdpSocket::bind("0.0.0.0:0").await?
+            crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?
         } else {
-            UdpSocket::bind("[::]:0").await?
+            crate::tunnel::underlay_policy::bind_udp("[::]:0").await?
         };
         socket.send_to(&rsp_buf, addr).await?;
     }
@@ -602,6 +602,7 @@ impl TunnelListener for UdpTunnelListener {
             let tunnel_url: TunnelUrl = self.addr.clone().into();
             self.socket = Some(Arc::new(
                 bind()
+                    .underlay(true)
                     .addr(addr)
                     .only_v6(true)
                     .maybe_dev(tunnel_url.bind_dev())
@@ -877,9 +878,9 @@ impl UdpTunnelConnector {
         addr: SocketAddr,
     ) -> Result<Box<dyn Tunnel>, super::TunnelError> {
         let socket = if addr.is_ipv4() {
-            UdpSocket::bind("0.0.0.0:0").await?
+            crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?
         } else {
-            UdpSocket::bind("[::]:0").await?
+            crate::tunnel::underlay_policy::bind_udp("[::]:0").await?
         };
 
         return self.try_connect_with_socket(Arc::new(socket), addr).await;
@@ -893,7 +894,7 @@ impl UdpTunnelConnector {
 
         for bind_addr in self.bind_addrs.iter() {
             tracing::info!(?bind_addr, ?addr, "bind addr");
-            match bind().addr(*bind_addr).only_v6(true).call() {
+            match bind().underlay(true).addr(*bind_addr).only_v6(true).call() {
                 Ok(socket) => futures.push(self.try_connect_with_socket(Arc::new(socket), addr)),
                 Err(error) => {
                     tracing::error!(?error, ?bind_addr, ?addr, "bind addr fail");

@@ -1,23 +1,21 @@
-# Underlay 防递归审计
+# Underlay 防递归审计（2026-09-18）
 
-结论：已有 `bind_device=true` 不能证明所有 Underlay 流量都受保护。当前 Host 不启用 Internet 默认路由。
+当前 Host 仍不启用 Internet 默认路由。仅设置 `bind_device=true` 不构成保护证明。
 
-## 已有公共入口
+## 已实现的实验性保护
 
-`easytier/src/tunnel/common.rs` 的 `bind` / `setup_socket2_ext` 支持 Auto、Disabled、Custom。Windows 委托 `arch/windows.rs::setup_socket_for_win` 设置接口；Linux 使用 `bind_device`。绑定 `0.0.0.0` 等未指定地址时，Linux 会提前返回，不能假设已绑定设备。
+Core 参数 `--underlay-source-ipv4` 安装不可变的进程级 IPv4 策略，仅允许一个静态配置，拒绝包含 QUIC/WireGuard/WebSocket/FakeTCP 的构建。未指定源地址的维护 socket 改为物理 IPv4，并使用 Windows 接口绑定或 Linux SO_BINDTODEVICE；请求其他 IPv4 源时失败。物理地址改变必须重启 Core。
 
-## 需要逐条处理的生产路径
+显式标记的维护路径包括 TCP/UDP 隧道监听和连接、UDP 打洞与地址发现、STUN UDP/TCP、网络地址探测，以及 Hickory TCP/UDP DNS。保护模式禁用系统 DNS 查询，使用原有公共 DNS 上游通过受保护 socket 查询；STUN 主机解析也统一进入该入口。UPnP 依赖库未受控，因此保护模式强制关闭 UPnP。
 
-- `connector/udp_hole_punch/common.rs`、`cone.rs`、`sym_to_cone.rs` 中存在直接 `UdpSocket::bind`。
-- `connector/direct.rs`、`connector/mod.rs` 存在未指定地址的 UDP 创建。
-- `common/stun.rs` 有多个 UDP 入口及直接 socket2 创建；需要同时覆盖 STUN 与 TCP NAT 探测。
-- `common/network.rs` 的 IPv4/IPv6 探测 socket 需要单独区分用途。
-- `tunnel/tcp.rs`、`tunnel/udp.rs` 存在绕过公共绑定入口的连接路径，需要区分 RPC、本地桥接和公网隧道。
-- `tunnel/websocket.rs` 和 `tunnel/fake_tcp/mod.rs` 存在直接 TCP socket；后者还有原始流量路径。
-- UPnP 和依赖库内创建 socket 的情况需要按真实使用路径确认。
+环回和 IPv6 保留原路由语义；维护 IPv6 socket 强制 v6-only，防止 IPv4-mapped 绕过绑定。Host 只计划接管 IPv4。业务 IP proxy、Exit Node 转发、虚拟网卡广播没有全局替换；公共 bind 默认仍不启用 Underlay 策略。
 
-不能全局替换所有 `TcpStream/UdpSocket`：IP proxy、Exit Node 转发、DNS 和 Overlay 业务 socket 的路由语义不同。策略必须携带用途和所属网络实例，并在物理接口变化时重建相关连接。仅定时增加已知 peer `/32` 无法保护首次打洞的新目标。
+## 尚未满足的放行条件
 
-## 保护完成的验证条件
+- Host 启动前捕获物理接口，将策略传给 Core，并验证启动能力和实例身份。
+- 物理地址/接口变化时先撤销路由/DNS，再停止并重建 Core。
+- 约束运行中的 RPC 新建/修改实例，避免重新启用未审计的 UPnP 或其他路径。
+- 检查所有实际启用维护出口，Windows/Linux 抓包验证 Seed、Relay、STUN、新打洞 endpoint 和 DNS 均走物理接口。
+- 多节点验证默认路由前后业务、P2P、RTT、丢包和网卡切换恢复。
 
-抓包确认 Seed、Relay、STUN、NAT Probe、TCP/UDP 打洞及新出现 endpoint 的出站流量走物理接口；Overlay 业务仍经过 TUN。覆盖 TCP/UDP/QUIC/WebSocket/WireGuard 及实际启用的其他传输。比较 Gateway 开关前后 P2P、RTT 和丢包；切换物理接口后重复验证。
+因此不能仅凭单元测试或已知 Peer 的 /32 保护路由释放默认路由开关。

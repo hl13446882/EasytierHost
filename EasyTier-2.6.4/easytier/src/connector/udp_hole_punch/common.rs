@@ -290,7 +290,7 @@ impl UdpSocketArray {
         while self.sockets.len() < self.max_socket_count {
             let socket = {
                 let _g = self.net_ns.guard();
-                Arc::new(UdpSocket::bind("0.0.0.0:0").await?)
+                Arc::new(crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?)
             };
 
             self.add_new_socket(socket).await?;
@@ -375,7 +375,7 @@ impl UdpHolePunchListener {
     ) -> Result<Self, Error> {
         let socket = {
             let _g = peer_mgr.get_global_ctx().net_ns.guard();
-            Arc::new(UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0))).await?)
+            Arc::new(crate::tunnel::underlay_policy::bind_udp((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0))).await?)
         };
         let local_port = socket.local_addr()?.port();
         let listen_url: url::Url = format!("udp://0.0.0.0:{local_port}").parse().unwrap();
@@ -717,7 +717,7 @@ async fn check_udp_socket_local_addr(
     global_ctx: ArcGlobalCtx,
     remote_mapped_addr: SocketAddr,
 ) -> Result<(), Error> {
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    let socket = crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?;
     socket.connect(remote_mapped_addr).await?;
     if let Ok(local_addr) = socket.local_addr()
         && let Some(err) = easytier_managed_local_addr_error(&global_ctx, local_addr)

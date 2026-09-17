@@ -25,6 +25,7 @@ pub mod ring;
 pub mod stats;
 pub mod tcp;
 pub mod udp;
+pub mod underlay_policy;
 
 #[cfg(feature = "faketcp")]
 pub mod fake_tcp;

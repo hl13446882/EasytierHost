@@ -4,7 +4,6 @@ use std::{
 };
 
 use anyhow::Context;
-use tokio::net::UdpSocket;
 use tokio_util::task::AbortOnDropHandle;
 
 use crate::{
@@ -143,7 +142,7 @@ impl PunchConeHoleClient {
 
         let local_socket = {
             let _g = self.peer_mgr.get_global_ctx().net_ns.guard();
-            Arc::new(UdpSocket::bind("0.0.0.0:0").await?)
+            Arc::new(crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?)
         };
         let local_addr = local_socket
             .local_addr()

@@ -61,7 +61,7 @@ impl TunnelListener for TcpTunnelListener {
         self.listener = None;
 
         let addr = SocketAddr::from_url(self.addr.clone(), IpVersion::Both).await?;
-        let listener = bind::<TcpListener>().addr(addr).only_v6(true).call()?;
+        let listener = bind::<TcpListener>().underlay(true).addr(addr).only_v6(true).call()?;
 
         self.addr
             .set_port(Some(listener.local_addr()?.port()))
@@ -147,7 +147,7 @@ impl TcpTunnelConnector {
         addr: SocketAddr,
     ) -> Result<Box<dyn Tunnel>, super::TunnelError> {
         tracing::info!(url = ?self.addr, ?addr, "connect tcp start, bind addrs: {:?}", self.bind_addrs);
-        let stream = TcpStream::connect(addr).await?;
+        let stream = crate::tunnel::underlay_policy::connect_tcp(addr).await?;
         tracing::info!(url = ?self.addr, ?addr, "connect tcp succ");
         get_tunnel_with_tcp_stream(stream, self.addr.clone())
     }
@@ -160,7 +160,7 @@ impl TcpTunnelConnector {
 
         for bind_addr in self.bind_addrs.iter() {
             tracing::info!(?bind_addr, ?addr, "bind addr");
-            match bind::<TcpSocket>().addr(*bind_addr).only_v6(true).call() {
+            match bind::<TcpSocket>().underlay(true).addr(*bind_addr).only_v6(true).call() {
                 Ok(socket) => futures.push(socket.connect(addr)),
                 Err(error) => {
                     tracing::error!(?bind_addr, ?addr, ?error, "bind addr fail");

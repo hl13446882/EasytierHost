@@ -70,7 +70,10 @@ public sealed class LinuxRouteApi(CommandRunner runner) : IRouteApi
         var route = candidates.FirstOrDefault() ?? throw new HostException("ETH301", "No physical default route");
         var nic = Nic(route.InterfaceIndex); var props = nic.GetIPProperties();
         var ip = props.UnicastAddresses.First(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !OverlayAddressPlan.IsOverlay(a.Address));
-        return new(nic.Name, route.InterfaceIndex, ip.Address.ToString(), route.NextHop, 0, routes.Where(r => r.Destination == "0.0.0.0/0").ToArray(), routes.Where(r => r.NextHop == "0.0.0.0").ToArray(), props.DnsAddresses.Select(a => a.ToString()).ToArray());
+        string[] servers;
+        try { servers = (await new ResolvedLink(runner).ReadAsync(route.InterfaceIndex, ct)).Servers; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { servers = []; }
+        return new(nic.Name, route.InterfaceIndex, ip.Address.ToString(), route.NextHop, 0, routes.Where(r => r.Destination == "0.0.0.0/0").ToArray(), routes.Where(r => r.NextHop == "0.0.0.0").ToArray(), servers);
     }
     private Task<string> ChangeAsync(string action, RouteEntry r, CancellationToken ct)
     {

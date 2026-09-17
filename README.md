@@ -1,6 +1,6 @@
 # EasyTierHost
 
-基于所提供 EasyTier 2.6.4 源码实现的 **Overlay 基础预览版**。已提供受限 DHCP、角色配置、Host CLI/进程守护、路由事务库与 DNS 转发器。**完整自治网关、远程部署、Windows GUI 尚未完成**，具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
+基于所提供 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。已提供受限 DHCP、角色配置、Host 进程守护、网关 NAT/forwarding/DNS 生命周期及客户端路由组件。**完整自治网关、远程部署、Windows GUI 尚未完成**，具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
 
 ## 构建与测试
 
@@ -11,7 +11,7 @@ dotnet build EasyTierHost.sln
 dotnet run --project tests/EasyTierHost.UnitTests
 cd EasyTier-2.6.4
 $env:PATH = "$PWD/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
-cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features
+cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
 cargo +stable build -p easytier --no-default-features --features tun --bin easytier-core --bin easytier-cli
 ```
 
@@ -38,10 +38,12 @@ dotnet run --project src/EasyTierHost.Service -- diagnostics C:/your-private-con
 
 `configure <profile> <output.toml>` 可单独生成私有 Core 配置；该文件含明文 network secret。`dns <gateway-profile>` 是独立 DNS 转发命令，要求本机已具有 `10.10.0.1`，不会配置 NAT 或系统 DNS。
 
-目前不支持通过 Host 启动 Gateway 角色，也不支持 Client 接管默认路由。这两种请求会明确失败，不会静默跳过功能。路由事务库已有故障注入测试，但不代表真实系统路由、NAT 和防递归已经验收。
+Gateway 角色可由 Host 启动，配置 NAT、forwarding 和 UDP/TCP DNS，并在退出或失败时撤销自有状态。Windows 使用 WinNAT，Linux 要求 nftables 且现有防火墙允许转发与 TUN DNS。运行状态见专用状态目录的 gateway-status.json。Client 接管默认路由仍明确禁用：Underlay 补丁尚需启动协调器和多机抓包验收。平台配置已有故障注入测试，未在开发机实际写入路由、NAT 或防火墙。
 
 ## 打包
 
 `scripts/publish/Publish.ps1 -CoreDirectory <编译输出目录>` 生成自包含 Host 加 Core/CLI 的 Overlay 预览包、文件校验和及 manifest。Linux 发布使用 `-Runtime linux-x64`，必须提供 Linux Core/CLI；此脚本不替代跨平台编译。Linux systemd unit 模板位于 `scripts/linux`，不是自动安装程序。当前没有 Windows 服务安装程序。
 
 在 Windows 预览包目录中，可用 `./easytier-host.exe` 替代上文的 `dotnet run --project src/EasyTierHost.Service --` 前缀；Linux 使用 `./easytier-host`。先复制并编辑 templates 中的配置，再设置 secret；不要直接连接文档示例 IP。
+
+网关前置条件、启动与恢复操作见 [Gateway 运行说明](docs/GATEWAY-OPERATIONS.md)。0.2 打包默认输出到 publish/preview-0.2-win-x64，保留旧版发布目录。

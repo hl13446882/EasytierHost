@@ -11,7 +11,9 @@ try {
     try {
         if (Test-Path -LiteralPath 'C:\Program Files\7-Zip\7z.exe') { $env:PATH = 'C:\Program Files\7-Zip;' + $env:PATH }
         $env:PATH = (Join-Path $workspace 'EasyTier-2.6.4/easytier/third_party/x86_64') + ';' + $env:PATH
-        cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features
+        cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
         if ($LASTEXITCODE) { throw 'DHCP tests failed' }
+        cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun
+        if ($LASTEXITCODE) { throw 'Underlay tests failed' }
     } finally { Pop-Location }
 } finally { Pop-Location }

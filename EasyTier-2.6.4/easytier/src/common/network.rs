@@ -171,7 +171,7 @@ impl InterfaceFilter {
 }
 
 pub async fn local_ipv4() -> std::io::Result<std::net::Ipv4Addr> {
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+    let socket = crate::tunnel::underlay_policy::bind_udp("0.0.0.0:0").await?;
     socket.connect("8.8.8.8:80").await?;
     let addr = socket.local_addr()?;
     match addr.ip() {
@@ -184,7 +184,7 @@ pub async fn local_ipv4() -> std::io::Result<std::net::Ipv4Addr> {
 }
 
 pub async fn local_ipv6() -> std::io::Result<std::net::Ipv6Addr> {
-    let socket = tokio::net::UdpSocket::bind("[::]:0").await?;
+    let socket = crate::tunnel::underlay_policy::bind_udp("[::]:0").await?;
     socket
         .connect("[2001:4860:4860:0000:0000:0000:0000:8888]:80")
         .await?;

@@ -3,16 +3,78 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
-use hickory_proto::runtime::TokioRuntimeProvider;
+use hickory_proto::runtime::{RuntimeProvider, TokioRuntimeProvider};
 use hickory_proto::xfer::Protocol;
+use hickory_resolver::Resolver;
 use hickory_resolver::config::{LookupIpStrategy, NameServerConfig, ResolverConfig, ResolverOpts};
-use hickory_resolver::name_server::{GenericConnector, TokioConnectionProvider};
+use hickory_resolver::name_server::GenericConnector;
 use hickory_resolver::system_conf::read_system_conf;
-use hickory_resolver::{Resolver, TokioResolver};
 use once_cell::sync::Lazy;
 use tokio::net::lookup_host;
 
 use super::error::Error;
+
+/// DNS used by tunnel discovery must follow the same binding policy as its tunnels.
+#[derive(Clone, Default)]
+pub struct UnderlayDnsRuntime(TokioRuntimeProvider);
+
+impl RuntimeProvider for UnderlayDnsRuntime {
+    type Handle = <TokioRuntimeProvider as RuntimeProvider>::Handle;
+    type Timer = <TokioRuntimeProvider as RuntimeProvider>::Timer;
+    type Udp = <TokioRuntimeProvider as RuntimeProvider>::Udp;
+    type Tcp = <TokioRuntimeProvider as RuntimeProvider>::Tcp;
+
+    fn create_handle(&self) -> Self::Handle {
+        self.0.create_handle()
+    }
+
+    fn connect_tcp(
+        &self,
+        server: SocketAddr,
+        bind: Option<SocketAddr>,
+        timeout: Option<std::time::Duration>,
+    ) -> std::pin::Pin<Box<dyn Send + std::future::Future<Output = std::io::Result<Self::Tcp>>>>
+    {
+        if !crate::tunnel::underlay_policy::is_enabled() {
+            return self.0.connect_tcp(server, bind, timeout);
+        }
+        Box::pin(async move {
+            let local = bind.unwrap_or_else(|| {
+                if server.is_ipv4() {
+                    "0.0.0.0:0"
+                } else {
+                    "[::]:0"
+                }
+                .parse()
+                .unwrap()
+            });
+            let socket = crate::tunnel::common::bind::<tokio::net::TcpSocket>()
+                .addr(local)
+                .underlay(true)
+                .call()
+                .map_err(std::io::Error::other)?;
+            socket.set_nodelay(true)?;
+            let stream = tokio::time::timeout(
+                timeout.unwrap_or(std::time::Duration::from_secs(5)),
+                socket.connect(server),
+            )
+            .await??;
+            Ok(hickory_proto::runtime::iocompat::AsyncIoTokioAsStd(stream))
+        })
+    }
+
+    fn bind_udp(
+        &self,
+        local: SocketAddr,
+        server: SocketAddr,
+    ) -> std::pin::Pin<Box<dyn Send + std::future::Future<Output = std::io::Result<Self::Udp>>>>
+    {
+        if !crate::tunnel::underlay_policy::is_enabled() {
+            return self.0.bind_udp(local, server);
+        }
+        Box::pin(crate::tunnel::underlay_policy::bind_udp(local))
+    }
+}
 
 pub fn get_default_resolver_config() -> ResolverConfig {
     let mut default_resolve_config = ResolverConfig::new();
@@ -29,22 +91,39 @@ pub fn get_default_resolver_config() -> ResolverConfig {
 
 pub static ALLOW_USE_SYSTEM_DNS_RESOLVER: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(true));
 
-pub static RESOLVER: Lazy<Arc<Resolver<GenericConnector<TokioRuntimeProvider>>>> =
-    Lazy::new(|| {
-        let system_cfg = read_system_conf();
-        let mut cfg = get_default_resolver_config();
-        let mut opt = ResolverOpts::default();
-        if let Ok(s) = system_cfg {
-            for ns in s.0.name_servers() {
-                cfg.add_name_server(ns.clone());
-            }
-            opt = s.1;
+pub static RESOLVER: Lazy<Arc<Resolver<GenericConnector<UnderlayDnsRuntime>>>> = Lazy::new(|| {
+    // A system stub may forward back through the TUN after default-route takeover.
+    let system_cfg = if crate::tunnel::underlay_policy::is_enabled() {
+        None
+    } else {
+        read_system_conf().ok()
+    };
+    let mut cfg = get_default_resolver_config();
+    let mut opt = ResolverOpts::default();
+    if let Some(s) = system_cfg {
+        for ns in s.0.name_servers() {
+            cfg.add_name_server(ns.clone());
         }
-        opt.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-        let builder = TokioResolver::builder_with_config(cfg, TokioConnectionProvider::default())
+        opt = s.1;
+    }
+    opt.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
+    let builder =
+        Resolver::builder_with_config(cfg, GenericConnector::new(UnderlayDnsRuntime::default()))
             .with_options(opt);
-        Arc::new(builder.build())
-    });
+    Arc::new(builder.build())
+});
+
+pub async fn lookup_maintenance_host(host: &str) -> Result<Vec<SocketAddr>, Error> {
+    if !crate::tunnel::underlay_policy::is_enabled() {
+        return Ok(lookup_host(host)
+            .await
+            .with_context(|| "maintenance DNS lookup failed")?
+            .collect());
+    }
+    let url = url::Url::parse(&format!("udp://{host}"))
+        .with_context(|| "invalid maintenance endpoint")?;
+    socket_addrs(&url, || None).await
+}
 
 pub async fn resolve_txt_record(domain_name: &str) -> Result<String, Error> {
     let r = RESOLVER.clone();
@@ -82,7 +161,9 @@ pub async fn socket_addrs(
     }
     let host = host.to_string();
 
-    if ALLOW_USE_SYSTEM_DNS_RESOLVER.load(std::sync::atomic::Ordering::Relaxed) {
+    if !crate::tunnel::underlay_policy::is_enabled()
+        && ALLOW_USE_SYSTEM_DNS_RESOLVER.load(std::sync::atomic::Ordering::Relaxed)
+    {
         let socket_addr = format!("{}:{}", host, port);
         match lookup_host(socket_addr).await {
             Ok(a) => {
@@ -113,6 +194,35 @@ pub async fn socket_addrs(
 mod tests {
     use super::*;
     use guarden::defer;
+
+    #[tokio::test]
+    async fn underlay_dns_runtime_preserves_unconfigured_loopback() {
+        let runtime = UnderlayDnsRuntime::default();
+        let udp = runtime
+            .bind_udp(
+                "127.0.0.1:0".parse().unwrap(),
+                "127.0.0.1:53".parse().unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(udp.local_addr().unwrap().ip().is_loopback());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stream = runtime
+            .connect_tcp(
+                listener.local_addr().unwrap(),
+                None,
+                Some(std::time::Duration::from_secs(2)),
+            )
+            .await
+            .unwrap();
+        assert!(stream.0.local_addr().unwrap().ip().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn underlay_maintenance_numeric_endpoint_preserved() {
+        let ips = lookup_maintenance_host("127.0.0.1:3478").await.unwrap();
+        assert_eq!(ips, vec!["127.0.0.1:3478".parse::<SocketAddr>().unwrap()]);
+    }
 
     #[tokio::test]
     async fn test_socket_addrs() {

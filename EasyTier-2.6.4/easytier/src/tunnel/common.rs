@@ -529,8 +529,16 @@ pub fn bind<B: Bindable>(
     #[builder(default, into)] dev: BindDev,
     net_ns: Option<NetNS>,
     #[builder(default)] only_v6: bool,
+    #[builder(default)] underlay: bool,
 ) -> Result<B, TunnelError> {
     let _g = net_ns.map(|n| n.guard());
+    let (addr, dev) = if underlay {
+        super::underlay_policy::resolve(addr, dev)?
+    } else {
+        (addr, dev)
+    };
+    // A dual-stack IPv6 maintenance socket must not bypass the IPv4 source policy.
+    let only_v6 = only_v6 || (underlay && super::underlay_policy::is_enabled() && addr.is_ipv6());
     let dev = match dev {
         BindDev::Auto => get_interface_name_by_ip(&addr.ip()),
         BindDev::Disabled => None,

@@ -11,7 +11,7 @@ use crossbeam::atomic::AtomicCell;
 use rand::seq::IteratorRandom;
 use socket2::{SockAddr, SockRef};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UdpSocket, lookup_host};
+use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinSet;
 use tracing::{Instrument, Level};
@@ -105,9 +105,9 @@ impl HostResolverIter {
 
             let use_ipv6 = self.use_ipv6;
 
-            match lookup_host(&host).await {
+            match super::dns::lookup_maintenance_host(&host).await {
                 Ok(ips) => {
-                    self.ips = ips
+                    self.ips = ips.into_iter()
                         .filter(|x| if use_ipv6 { x.is_ipv6() } else { x.is_ipv4() })
                         .choose_multiple(&mut rand::thread_rng(), self.max_ip_per_domain as usize);
 
@@ -616,7 +616,7 @@ impl UdpNatTypeDetector {
         source_port: u16,
         stun_server: SocketAddr,
     ) -> Result<BindRequestResponse, Error> {
-        let udp = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", source_port)).await?);
+        let udp = Arc::new(crate::tunnel::underlay_policy::bind_udp(format!("0.0.0.0:{}", source_port)).await?);
         let client_builder = StunClientBuilder::new(udp.clone());
         client_builder
             .new_stun_client(stun_server)
@@ -628,7 +628,7 @@ impl UdpNatTypeDetector {
         &self,
         source_port: u16,
     ) -> Result<StunNatTypeDetectResult, Error> {
-        let udp = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", source_port)).await?);
+        let udp = Arc::new(crate::tunnel::underlay_policy::bind_udp(format!("0.0.0.0:{}", source_port)).await?);
         self.detect_nat_type_with_socket(udp).await
     }
 
@@ -793,6 +793,13 @@ impl TcpStunClient {
             let _ = socket2_socket.set_reuse_port(true);
         }
 
+        let (bind_addr, bind_dev) = crate::tunnel::underlay_policy::resolve(bind_addr, crate::tunnel::common::BindDev::Auto)?;
+        if let crate::tunnel::common::BindDev::Custom(device) = bind_dev {
+            #[cfg(target_os = "windows")]
+            crate::arch::windows::setup_socket_for_win(&socket2_socket, &bind_addr, Some(device), false)?;
+            #[cfg(target_os = "linux")]
+            socket2_socket.bind_device(Some(device.as_bytes()))?;
+        }
         socket2_socket.bind(&SockAddr::from(bind_addr))?;
 
         let socket = tokio::net::TcpSocket::from_std_stream(socket2_socket.into());
@@ -978,7 +985,7 @@ impl StunInfoCollectorTrait for StunInfoCollector {
     }
 
     async fn get_udp_port_mapping(&self, local_port: u16) -> Result<SocketAddr, Error> {
-        let udp = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", local_port)).await?);
+        let udp = Arc::new(crate::tunnel::underlay_policy::bind_udp(format!("0.0.0.0:{}", local_port)).await?);
         self.get_udp_port_mapping_with_socket(udp).await
     }
 
@@ -1155,7 +1162,7 @@ impl StunInfoCollector {
     async fn get_public_ipv6(servers: &[String]) -> Option<Ipv6Addr> {
         let mut ips = HostResolverIter::new(servers.to_vec(), 10, true);
         while let Some(ip) = ips.next().await {
-            let Ok(udp_socket) = UdpSocket::bind("[::]:0".to_string()).await else {
+            let Ok(udp_socket) = crate::tunnel::underlay_policy::bind_udp("[::]:0".to_string()).await else {
                 break;
             };
             let udp = Arc::new(udp_socket);

@@ -47,7 +47,13 @@ public sealed record RouteEntry(string Destination, string NextHop, int Interfac
 public sealed record RouteSnapshot(string PhysicalInterfaceName, int PhysicalInterfaceIndex,
     string PhysicalIpv4, string PhysicalGateway, int InterfaceMetric,
     IReadOnlyList<RouteEntry> DefaultRoutes, IReadOnlyList<RouteEntry> LocalLanRoutes,
-    IReadOnlyList<string> OriginalDnsServers);
+    IReadOnlyList<string> OriginalDnsServers)
+{
+    public DnsClientSnapshot? DnsState { get; init; }
+}
+public sealed record DnsDomain(string Name, bool RoutingOnly);
+public sealed record DnsClientSnapshot(string Platform, int InterfaceIndex, string InterfaceIdentity,
+    IReadOnlyList<string> Servers, IReadOnlyList<DnsDomain> Domains, bool DefaultRoute, string OwnerToken);
 public sealed record GatewayContext(int OverlayInterfaceIndex, string OverlayIp, IReadOnlyList<IPAddress> Endpoints,
     bool UnderlayProtectionVerified = false);
 public sealed record HealthStatus(bool UnderlayOk, bool SeedReachable, bool OverlayOk, bool GatewayReachable, bool DnsOk, bool InternetOk);
