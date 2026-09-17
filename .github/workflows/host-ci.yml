@@ -22,3 +22,5 @@ jobs:
         run: dotnet build EasyTierHost.sln --nologo
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
+      - name: Run underlay integration smoke tests
+        run: dotnet run --project tests/EasyTierHost.IntegrationTests
