@@ -28,6 +28,11 @@ jobs:
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run underlay integration smoke tests
         run: dotnet run --project tests/EasyTierHost.IntegrationTests
+      - name: Install Protocol Buffers compiler
+        shell: pwsh
+        run: |
+          choco install protoc --yes --no-progress
+          protoc --version
       - name: Run EasyTier DHCP and underlay tests
         shell: pwsh
         working-directory: EasyTier-2.6.4
