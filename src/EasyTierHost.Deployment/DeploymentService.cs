@@ -7,6 +7,9 @@ public sealed class DeploymentService
     public async Task<DeploymentResult> InstallAsync(DeploymentRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var integrity = await ValidatePackageIntegrityAsync(request.LocalPackageDirectory, ct);
+        if (integrity is not null) return integrity;
+
         await using var remote = RemoteExecutorFactory.Create(request.Remote);
         if (!await remote.TestConnectionAsync(ct)) return DeploymentResult.Fail("ETH001", "SSH connection failed");
         IServiceInstaller installer = request.OsType == ServerOsType.Windows
@@ -24,6 +27,30 @@ public sealed class DeploymentService
             ? new WindowsRemoteInstaller()
             : new LinuxRemoteInstaller();
         return await installer.UninstallAsync(request, remote, ct);
+    }
+
+    private static async Task<DeploymentResult?> ValidatePackageIntegrityAsync(string packageRoot, CancellationToken ct)
+    {
+        try
+        {
+            var root = Path.GetFullPath(packageRoot);
+            var manifestPath = Path.Combine(root, "artifact-manifest.json");
+            if (!File.Exists(manifestPath)) return DeploymentResult.Fail("ETH403", "Package manifest is missing");
+            var manifest = await ArtifactManifest.LoadAsync(manifestPath, ct);
+            await manifest.ValidateAsync(root, ct);
+
+            var expected = manifest.Files.Select(f => f.Path.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var actual = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Where(f => !Path.GetFullPath(f).Equals(Path.GetFullPath(manifestPath), StringComparison.OrdinalIgnoreCase))
+                .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!expected.SetEquals(actual)) return DeploymentResult.Fail("ETH403", "Package contains unmanifested or missing files");
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException)
+        {
+            return DeploymentResult.Fail("ETH403", "Package integrity validation failed");
+        }
     }
 }
 
