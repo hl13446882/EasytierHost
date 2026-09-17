@@ -20,7 +20,7 @@ function Assert-Administrator {
 
 function Invoke-Sc([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments) {
     & "$env:SystemRoot\System32\sc.exe" @Arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "sc.exe failed with exit code $LASTEXITCODE: $($Arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) { throw "sc.exe failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')" }
 }
 
 function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSeconds = 30) {
