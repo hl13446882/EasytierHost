@@ -26,3 +26,16 @@ public interface IEasyTierProcessManager : IAsyncDisposable
     Task StopAsync(CancellationToken ct);
     Task<int> WaitForExitAsync(CancellationToken ct);
 }
+
+public interface IRemoteExecutor : IAsyncDisposable
+{
+    Task<bool> TestConnectionAsync(CancellationToken ct);
+    Task UploadAsync(string localPath, string remotePath, CancellationToken ct);
+    Task<RemoteCommandResult> ExecuteAsync(string command, CancellationToken ct);
+}
+
+public interface IServiceInstaller
+{
+    Task<DeploymentResult> InstallAsync(DeploymentRequest request, IRemoteExecutor remote, CancellationToken ct);
+    Task<DeploymentResult> UninstallAsync(DeploymentRequest request, IRemoteExecutor remote, CancellationToken ct);
+}
