@@ -12,8 +12,8 @@
 | DNS 转发 | UDP/TCP、并发限制、上游回退、随机上游事务 ID、问题字段校验、真实 socket 健康探测 | 协议模糊测试与负载验收 |
 | 客户端路由 | 写前日志、Probe 后提交两条 /1、原 /0 保留、启动协调器、动态 endpoint /32、接口变化撤销、崩溃恢复 | Windows/Linux 实机默认路由、切网、休眠/恢复和长期稳定性验收 |
 | 客户端 DNS / Probe | Windows 自有 NRPT、Linux resolved 指定链路、DNS/HTTPS 源地址探测、激活后周期健康探测 | 两平台真实 DNS、代理/VPN 共存和故障恢复验收 |
-| Underlay | TCP/UDP、STUN、打洞、发现 DNS 的显式物理 IPv4 绑定补丁；Host 启动前捕获物理 IPv4 并通过 `--underlay-source-ipv4` 传给 Core | RPC 动态实例/配置约束、网卡切换、多节点抓包验证 Seed/Relay/STUN/新 endpoint/DNS |
-| CI | Windows Host solution build + UnitTests 自动执行 | Rust 针对性测试和打包验证接入 CI |
+| Underlay | TCP/UDP、STUN、打洞、发现 DNS 的显式物理 IPv4 绑定；Host 启动前捕获物理 IPv4 并传入 Core；保护模式拒绝 RPC `patch_config` 与 RPC 新建/覆盖实例 | 网卡切换、多节点抓包验证 Seed/Relay/STUN/新 endpoint/DNS |
+| CI | Windows Host solution build、UnitTests、客户端路由集成 smoke；EasyTier DHCP/Underlay 针对性测试已接入 workflow | 发布包/manifest 验证接入 CI，Linux CI |
 | GUI / 部署 | 尚未实现 | 两个 WPF 界面、SSH 部署、完整双平台安装包 |
 
 ## 使用边界
@@ -22,6 +22,6 @@ Gateway 角色现可由 `run` 启动，要求管理员/root、连接到同网络
 
 Client 设置 `enableInternetGateway=true` 时，Host 会在 Core 启动前捕获物理默认出口，将物理 IPv4 作为运行时参数传给 `--underlay-source-ipv4`，等待 Client TUN 与 Core 实例身份一致后执行：保护 Seed/Peer endpoint → 安装 Probe /32 → DNS/HTTPS Probe → 应用客户端 DNS → 安装 `0.0.0.0/1` 和 `128.0.0.0/1`。原物理 `/0` 保留。运行期间发现物理接口/IP/网关、Overlay 身份、路由所有权或健康状态变化，会先撤销自有路由/DNS，再由 Host 重启 Core 并重新捕获物理出口。
 
-`UnderlayProtectionVerified` 仍不是用户可配置的豁免开关，只由 Host 根据本次 Core 启动实际绑定的物理 IPv4生成。Core 保护模式仅支持单静态配置的 TCP/UDP Host 构建，强制关闭 UPnP；维护 DNS 使用受保护的物理 socket，避免系统 DNS stub 在默认路由切换后递归进入 TUN。IPv6 默认路由不由 Host 接管。
+`UnderlayProtectionVerified` 仍不是用户可配置的豁免开关，只由 Host 根据本次 Core 启动实际绑定的物理 IPv4 生成。Core 保护模式仅支持单静态配置的 TCP/UDP Host 构建，强制关闭 UPnP；维护 DNS 使用受保护的物理 socket，避免系统 DNS stub 在默认路由切换后递归进入 TUN。保护模式下查询 RPC 保留，但运行时配置 patch 和 RPC 新建/覆盖实例被拒绝，配置变化必须由 Host 完成完整 rollback → restart。IPv6 默认路由不由 Host 接管。
 
-目前自动测试仍不能替代实机验收：平台路由/NAT/DNS 写入的大部分测试使用替身命令执行器，真实网络测试只覆盖本机回环 socket。开发分支新增 Windows GitHub Actions，持续执行 `dotnet build EasyTierHost.sln` 和 Host UnitTests；正式发布前仍需完成 Seed + Gateway + 两个 Client 的独立多机 Case、Windows/Linux 抓包与断电/切网恢复验证。
+目前自动测试仍不能替代实机验收：平台路由/NAT/DNS 写入的大部分测试使用替身命令执行器，真实网络测试只覆盖本机回环 socket。开发分支持续执行 Host build、UnitTests、Underlay/Client route smoke 以及 EasyTier DHCP/Underlay 针对性 Rust 测试；正式发布前仍需完成 Seed + Gateway + 两个 Client 的独立多机 Case、Windows/Linux 抓包与断电/切网恢复验证。
