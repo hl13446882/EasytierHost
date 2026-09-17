@@ -19,7 +19,7 @@ public static class Program
         {
             if (args.Length == 0 || args[0] == "help")
             {
-                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  status <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nInternet default-route activation is disabled pending complete underlay protection.");
+                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  status <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
                 return 0;
             }
             if (args[0] == "set-secret" && args.Length == 2)
@@ -90,12 +90,16 @@ public static class Program
     }
     private static async Task RunAsync(NetworkProfile p, string state, CancellationToken ct)
     {
-        if (p.EnableInternetGateway) throw new HostException("ETH301", "Internet gateway activation requires the unfinished underlay protection audit; overlay-only mode is available");
         await SecretProvider.SecureDirectoryAsync(state, ct);
         using var lease = new FileStream(Path.Combine(state, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var config = Path.Combine(state, "core.toml");
-        if (File.Exists(Path.Combine(state, "route-journal.json"))) throw new HostException("ETH302", "A route recovery journal exists; recover it before starting");
-        var gateway = new GatewayCoordinator(RouteApi(new CommandRunner()), OperatingSystem.IsWindows() ? new WindowsNatManager(new CommandRunner()) : new LinuxNatManager(new CommandRunner()), state);
+        var runner = new CommandRunner();
+        var routeApi = RouteApi(runner);
+        var probe = new GatewayProbe();
+        var routeController = new GatewayRouteController(routeApi, DnsController(runner), probe, Path.Combine(state, "route-journal.json"));
+        var clientInternet = new ClientInternetCoordinator(routeApi, routeController, probe, state);
+        var gateway = new GatewayCoordinator(routeApi, OperatingSystem.IsWindows() ? new WindowsNatManager(runner) : new LinuxNatManager(runner), state);
+        await clientInternet.RecoverAsync(ct);
         await gateway.RecoverAsync(ct);
         var instanceId = Guid.NewGuid();
         await WriteConfigAsync(p, config, ct, instanceId);
@@ -106,35 +110,55 @@ public static class Program
             while (!ct.IsCancellationRequested)
             {
                 using var iteration = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                Task? gatewayTask = null;
+                Task? roleTask = null;
                 int code;
                 try
                 {
-                    await manager.StartAsync(p, config, ct);
-                    await ConfigurationStore.SaveAtomicAsync(Path.Combine(state, "status.json"), new { BuildId = "0.2.0", Role = p.Role.ToString(), Pid = manager.ProcessId, StartedUtc = DateTimeOffset.UtcNow, State = p.Role == NodeRole.Gateway ? "GatewayStarting" : "OverlayOnly" }, ct);
+                    await clientInternet.RecoverAsync(ct);
+                    RouteSnapshot? launchPhysical = null;
+                    var launch = new CoreLaunchOptions();
+                    if (p.Role == NodeRole.Client && p.EnableInternetGateway)
+                    {
+                        launchPhysical = await routeApi.CaptureAsync(ct);
+                        launch = new CoreLaunchOptions { UnderlaySourceIpv4 = launchPhysical.PhysicalIpv4 };
+                    }
+                    await manager.StartAsync(p, config, launch, ct);
+                    var stateName = p.Role == NodeRole.Gateway ? "GatewayStarting" : p.Role == NodeRole.Client && p.EnableInternetGateway ? "ClientGatewayStarting" : "OverlayOnly";
+                    await ConfigurationStore.SaveAtomicAsync(Path.Combine(state, "status.json"), new { BuildId = "0.2.0", Role = p.Role.ToString(), Pid = manager.ProcessId, StartedUtc = DateTimeOffset.UtcNow, State = stateName }, ct);
                     Console.WriteLine($"Core started, PID {manager.ProcessId}, role {p.Role}");
                     var exitTask = manager.WaitForExitAsync(iteration.Token);
                     if (p.Role == NodeRole.Gateway)
+                        roleTask = gateway.RunAsync(p, manager, instanceId, iteration.Token);
+                    else if (p.Role == NodeRole.Client && p.EnableInternetGateway)
+                        roleTask = clientInternet.RunAsync(p, manager, instanceId, launchPhysical!, iteration.Token);
+
+                    if (roleTask is null)
                     {
-                        gatewayTask = gateway.RunAsync(p, manager, instanceId, iteration.Token);
-                        await await Task.WhenAny(exitTask, gatewayTask);
+                        code = await exitTask;
                     }
-                    code = await exitTask;
+                    else
+                    {
+                        var completed = await Task.WhenAny(exitTask, roleTask);
+                        if (completed == roleTask)
+                        {
+                            await roleTask;
+                            throw new HostException("ETH201", "Role coordinator stopped unexpectedly");
+                        }
+                        code = await exitTask;
+                        await iteration.CancelAsync();
+                        try { await roleTask; }
+                        catch (OperationCanceledException) when (iteration.IsCancellationRequested) { }
+                    }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
-                    Console.Error.WriteLine(ex is HostException host ? host.Message : $"Core/gateway failure: {ex.GetType().Name}");
+                    Console.Error.WriteLine(ex is HostException host ? host.Message : $"Core/network failure: {ex.GetType().Name}");
                     code = -1;
                 }
                 finally
                 {
                     await iteration.CancelAsync();
-                    try
-                    {
-                        if (gatewayTask is not null)
-                            try { await gatewayTask; } catch (Exception ex) when (ex is not AggregateException) { }
-                    }
-                    finally { await manager.StopAsync(CancellationToken.None); }
+                    await manager.StopAsync(CancellationToken.None);
                 }
                 var now = DateTimeOffset.UtcNow; failures.Enqueue(now);
                 while (failures.Count > 0 && now - failures.Peek() > TimeSpan.FromMinutes(2)) failures.Dequeue();
@@ -151,13 +175,14 @@ public static class Program
         }
     }
     private static IRouteApi RouteApi(CommandRunner runner) => OperatingSystem.IsWindows() ? new WindowsRouteApi(runner) : new LinuxRouteApi(runner);
+    private static IDnsController DnsController(CommandRunner runner) => OperatingSystem.IsWindows() ? new WindowsDnsController(runner) : new LinuxDnsController(runner);
     private static async Task DiagnosticsAsync(NetworkProfile p, CancellationToken ct)
     {
         var runner = new CommandRunner();
         RouteSnapshot? physical = null; string? captureError = null;
         try { physical = await RouteApi(runner).CaptureAsync(ct); } catch (Exception ex) { captureError = ex.GetType().Name; }
         var overlay = NetworkInterface.GetAllNetworkInterfaces().SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address).Where(OverlayAddressPlan.IsOverlay).Select(a => a.ToString()).ToArray();
-        Console.WriteLine(JsonSerializer.Serialize(new { BuildId = "0.2.0", CoreBase = "2.6.4", Schema = p.SchemaVersion, Role = p.Role.ToString(), p.SeedPhysicalIp, Physical = physical, OverlayAddresses = overlay, CaptureError = captureError, GatewayState = p.Role == NodeRole.Gateway ? "UseGatewayStatusFileForRuntimeState" : "InternetActivationDisabledPendingUnderlayAudit" }, ConfigurationStore.Json));
+        Console.WriteLine(JsonSerializer.Serialize(new { BuildId = "0.2.0", CoreBase = "2.6.4", Schema = p.SchemaVersion, Role = p.Role.ToString(), p.SeedPhysicalIp, Physical = physical, OverlayAddresses = overlay, CaptureError = captureError, GatewayState = p.Role == NodeRole.Gateway ? "UseGatewayStatusFileForRuntimeState" : p.Role == NodeRole.Client && p.EnableInternetGateway ? "UseClientGatewayStatusFileForRuntimeState" : "OverlayOnly" }, ConfigurationStore.Json));
     }
     private static async Task RunDnsAsync(NetworkProfile p, CancellationToken ct)
     {

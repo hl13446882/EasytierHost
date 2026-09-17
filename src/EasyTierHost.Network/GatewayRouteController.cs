@@ -67,6 +67,30 @@ public sealed class GatewayRouteController(IRouteApi api, IDnsController dns, IG
         finally { gate.Release(); }
     }
 
+    /// <summary>Refresh physical /32 protection while the split default route is active. Adds first, then removes stale routes.</summary>
+    public async Task UpdateProtectionAsync(IEnumerable<System.Net.IPAddress> endpoints, CancellationToken ct = default)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (State != GatewayState.GatewayActive || journal is null) return;
+            var desired = RoutePlanner.Protect(journal.Snapshot, endpoints).ToArray();
+            if (desired.Any(r => r.Destination is "1.1.1.1/32" or "8.8.8.8/32"))
+                throw new HostException("ETH301", "Underlay endpoint conflicts with Internet probe target");
+            var ownedProtection = journal.Owned.Where(r => r.Destination.EndsWith("/32", StringComparison.Ordinal)).ToArray();
+            foreach (var route in desired)
+                if (!ownedProtection.Any(current => RoutePlanner.SameIdentity(current, route))) await AddOwnedAsync(route, ct);
+            foreach (var route in ownedProtection)
+                if (!desired.Any(current => RoutePlanner.SameIdentity(current, route))) await RemoveOwnedAsync(route, ct);
+        }
+        catch
+        {
+            if (journal is not null) await RollbackInternalAsync();
+            throw;
+        }
+        finally { gate.Release(); }
+    }
+
     private async Task AddOwnedAsync(RouteEntry route, CancellationToken ct)
     {
         var current = await api.ListAsync(ct);

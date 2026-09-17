@@ -21,7 +21,8 @@ public interface IEasyTierProcessManager : IAsyncDisposable
 {
     int? ProcessId { get; }
     bool IsRunning { get; }
-    Task StartAsync(NetworkProfile profile, string configurationPath, CancellationToken ct);
+    string? UnderlaySourceIpv4 { get; }
+    Task StartAsync(NetworkProfile profile, string configurationPath, CoreLaunchOptions options, CancellationToken ct);
     Task StopAsync(CancellationToken ct);
     Task<int> WaitForExitAsync(CancellationToken ct);
 }

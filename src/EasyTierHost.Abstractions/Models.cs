@@ -24,6 +24,13 @@ public sealed record NetworkProfile
     public string[] DnsUpstreams { get; init; } = [];
     public bool AllowPublicDnsFallback { get; init; }
 }
+
+/// <summary>Runtime-only Core launch data. Physical binding is discovered by Host and is never user configuration.</summary>
+public sealed record CoreLaunchOptions
+{
+    public string? UnderlaySourceIpv4 { get; init; }
+}
+
 public static class OverlayAddressPlan
 {
     public const string Cidr = "10.10.0.0/16";
