@@ -1,6 +1,6 @@
 # 实施状态（2026-09-18，0.2）
 
-已实现 Overlay 基础、网关生命周期与平台适配组件。尚未达到完整开发方案的交付标准；客户端默认路由接管仍被 Host 明确禁用。
+已实现 Overlay 基础、网关生命周期、平台适配组件，以及客户端 Internet 路由的实验性启动协调。尚未达到完整开发方案的交付标准；`enableInternetGateway=true` 现可进入受保护的 Probe → Commit → Reconcile 流程，但仍必须完成 Windows/Linux 多节点实机抓包与切网验收后才能视为正式可用。
 
 | 模块 | 已实现 | 尚需完成 |
 |---|---|---|
@@ -10,15 +10,18 @@
 | Windows NAT | 独占 WinNAT 检查、物理出口地址约束、按 GUID 恢复 forwarding、限定 TUN/子网/端口的 DNS 防火墙规则 | 实际 WinNAT 和防火墙写入验证 |
 | Linux NAT | 独立 nftables 表、所有权标记、限定 10.10/16 与出口的 masquerade、sysctl 恢复 | Linux 实机；现有防火墙需允许转发和 TUN DNS，未提供 iptables 回退 |
 | DNS 转发 | UDP/TCP、并发限制、上游回退、随机上游事务 ID、问题字段校验、真实 socket 健康探测 | 协议模糊测试与负载验收 |
-| 客户端路由 | 写前日志、探测后提交两条 /1、原 /0 保留、撤销和恢复、接口变化检查 | 启动协调器、动态 endpoint 与物理网络重绑定接线 |
-| 客户端 DNS / Probe | Windows 自有 NRPT 规则、Linux resolved 指定链路配置及恢复、源地址约束的 DNS/HTTPS 探测 | 实机验证；默认路由功能尚未接通 |
-| Underlay | TCP/UDP、STUN、打洞、发现 DNS 的显式物理 IPv4 绑定补丁 | Host 启动接线、RPC 配置变更约束、网卡切换、多节点抓包验收 |
+| 客户端路由 | 写前日志、Probe 后提交两条 /1、原 /0 保留、启动协调器、动态 endpoint /32、接口变化撤销、崩溃恢复 | Windows/Linux 实机默认路由、切网、休眠/恢复和长期稳定性验收 |
+| 客户端 DNS / Probe | Windows 自有 NRPT、Linux resolved 指定链路、DNS/HTTPS 源地址探测、激活后周期健康探测 | 两平台真实 DNS、代理/VPN 共存和故障恢复验收 |
+| Underlay | TCP/UDP、STUN、打洞、发现 DNS 的显式物理 IPv4 绑定补丁；Host 启动前捕获物理 IPv4 并通过 `--underlay-source-ipv4` 传给 Core | RPC 动态实例/配置约束、网卡切换、多节点抓包验证 Seed/Relay/STUN/新 endpoint/DNS |
+| CI | Windows Host solution build + UnitTests 自动执行 | Rust 针对性测试和打包验证接入 CI |
 | GUI / 部署 | 尚未实现 | 两个 WPF 界面、SSH 部署、完整双平台安装包 |
 
 ## 使用边界
 
 Gateway 角色现可由 `run` 启动，要求管理员/root、连接到同网络 Peer、独立物理接口和配置名称匹配的 .1/16 TUN。状态在专用状态目录的 `gateway-status.json`；崩溃恢复记录为 `gateway-journal.json`。清理失败保留日志并停止重启，不能手工删除日志来跳过恢复。
 
-`enableInternetGateway=true` 仍报错 ETH301。`UnderlayProtectionVerified` 不是可由用户配置的豁免开关。新 Core 参数 `--underlay-source-ipv4` 是实验性基础组件，仅支持单静态配置的 TCP/UDP 构建；Host 尚未传入该参数。启用时关闭 UPnP，并使维护 DNS 使用原 Core 的公共上游经物理接口查询，避免系统 DNS stub 递归。IPv6 默认路由不由 Host 接管。
+Client 设置 `enableInternetGateway=true` 时，Host 会在 Core 启动前捕获物理默认出口，将物理 IPv4 作为运行时参数传给 `--underlay-source-ipv4`，等待 Client TUN 与 Core 实例身份一致后执行：保护 Seed/Peer endpoint → 安装 Probe /32 → DNS/HTTPS Probe → 应用客户端 DNS → 安装 `0.0.0.0/1` 和 `128.0.0.0/1`。原物理 `/0` 保留。运行期间发现物理接口/IP/网关、Overlay 身份、路由所有权或健康状态变化，会先撤销自有路由/DNS，再由 Host 重启 Core 并重新捕获物理出口。
 
-平台写入测试使用替身命令执行器；真实网络测试只涉及本机回环 socket。没有修改开发机路由、DNS、NAT 或防火墙来代替多机验收。旧发布目录可能仍为 0.1，须以包内 version.txt 和 manifest 为准。
+`UnderlayProtectionVerified` 仍不是用户可配置的豁免开关，只由 Host 根据本次 Core 启动实际绑定的物理 IPv4生成。Core 保护模式仅支持单静态配置的 TCP/UDP Host 构建，强制关闭 UPnP；维护 DNS 使用受保护的物理 socket，避免系统 DNS stub 在默认路由切换后递归进入 TUN。IPv6 默认路由不由 Host 接管。
+
+目前自动测试仍不能替代实机验收：平台路由/NAT/DNS 写入的大部分测试使用替身命令执行器，真实网络测试只覆盖本机回环 socket。开发分支新增 Windows GitHub Actions，持续执行 `dotnet build EasyTierHost.sln` 和 Host UnitTests；正式发布前仍需完成 Seed + Gateway + 两个 Client 的独立多机 Case、Windows/Linux 抓包与断电/切网恢复验证。
