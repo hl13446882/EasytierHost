@@ -53,9 +53,8 @@ impl WebClientService for InstanceManageRpcService {
         _: BaseController,
         req: RunNetworkInstanceRequest,
     ) -> Result<RunNetworkInstanceResponse, rpc_types::error::Error> {
-        // EasyTierHost underlay protection is process-global and intentionally supports one
-        // immutable static instance. Starting/replacing an RPC instance could introduce
-        // transports or socket paths that were not covered by the captured physical binding.
+        // Underlay protection is process-global and supports one immutable static Host instance.
+        // Any RPC start/overwrite could introduce unaudited transports after route takeover.
         if crate::tunnel::underlay_policy::is_enabled() {
             return Err(anyhow::anyhow!(
                 "RPC instance start/overwrite is disabled while Host underlay protection is active; restart Core through EasyTierHost"
@@ -267,44 +266,72 @@ impl WebClientService for InstanceManageRpcService {
         _: BaseController,
         req: GetNetworkInstanceConfigRequest,
     ) -> Result<GetNetworkInstanceConfigResponse, rpc_types::error::Error> {
-        let instance_id: uuid::Uuid = req.inst_id.into();
-        let service = self
+        let inst_id: uuid::Uuid = req
+            .inst_id
+            .ok_or_else(|| anyhow::anyhow!("instance id is required"))?
+            .into();
+
+        let control = self
             .manager
-            .get_instance_service(&instance_id)
-            .ok_or_else(|| anyhow::anyhow!("instance not found"))?;
-        let config = service
-            .get_config_service()
-            .get_config(
-                BaseController::default(),
-                GetConfigRequest {
-                    instance: req.inst_id,
-                },
+            .get_instance_config_control(&inst_id)
+            .ok_or_else(|| anyhow::anyhow!("instance config control not found"))?;
+
+        if control.is_read_only() {
+            return Err(anyhow::anyhow!(
+                "Configuration for instance {} is read-only (uses environment variables) and cannot be retrieved via API. \
+                 Please access the configuration file directly on the file system.",
+                inst_id
             )
+            .into());
+        }
+
+        let config = self
+            .manager
+            .get_instance_service(&inst_id)
+            .ok_or_else(|| anyhow::anyhow!("instance service not found"))?
+            .get_config_service()
+            .get_config(BaseController::default(), GetConfigRequest::default())
             .await?
             .config;
-        Ok(GetNetworkInstanceConfigResponse { config })
+        Ok(GetNetworkInstanceConfigResponse {
+            config,
+            source: self
+                .manager
+                .get_instance_network_config_source(&inst_id)
+                .unwrap_or(ConfigSource::User)
+                .to_rpc(),
+        })
     }
 
     async fn list_network_instance_meta(
         &self,
         _: BaseController,
-        _: ListNetworkInstanceMetaRequest,
+        req: ListNetworkInstanceMetaRequest,
     ) -> Result<ListNetworkInstanceMetaResponse, rpc_types::error::Error> {
-        let mut metas = Vec::new();
-        for id in self.manager.list_network_instance_ids() {
-            let source = self
-                .manager
-                .get_instance_network_config_source(&id)
-                .unwrap_or_default();
-            let config = self.manager.get_instance_config_control(&id);
-            metas.push(NetworkMeta {
-                inst_id: Some(id.into()),
-                source: source.into(),
-                config_path: config
-                    .and_then(|control| control.path)
-                    .map(|path| path.to_string_lossy().to_string())
-                    .unwrap_or_default(),
-            });
+        let mut metas = Vec::with_capacity(req.inst_ids.len());
+        for inst_id in req.inst_ids {
+            let inst_id: uuid::Uuid = (inst_id).into();
+            let Some(control) = self.manager.get_instance_config_control(&inst_id) else {
+                continue;
+            };
+            let Some(network_name) = self.manager.get_network_name(&inst_id) else {
+                continue;
+            };
+            let Some(instance_name) = self.manager.get_instance_name(&inst_id) else {
+                continue;
+            };
+            let meta = NetworkMeta {
+                inst_id: Some(inst_id.into()),
+                network_name,
+                config_permission: control.permission.into(),
+                instance_name,
+                source: self
+                    .manager
+                    .get_instance_network_config_source(&inst_id)
+                    .unwrap_or(ConfigSource::User)
+                    .to_rpc(),
+            };
+            metas.push(meta);
         }
         Ok(ListNetworkInstanceMetaResponse { metas })
     }
