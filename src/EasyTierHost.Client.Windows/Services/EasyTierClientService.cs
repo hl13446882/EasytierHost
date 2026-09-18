@@ -85,7 +85,7 @@ public sealed partial class EasyTierClientService(ClientRuntimePaths paths)
         RunHostAsync(["ready", paths.ProfilePath], TimeSpan.FromSeconds(10), ct);
 
     public Task<LocalCommandResult> DiagnosticsAsync(CancellationToken ct) =>
-        RunHostAsync(["diagnostics", paths.ProfilePath, paths.StateDirectory], TimeSpan.FromSeconds(15), ct);
+        RunHostAsync(["diagnostics", paths.ProfilePath, paths.StateDirectory], TimeSpan.FromSeconds(30), ct);
 
     private Task<LocalCommandResult> RunHostAsync(IReadOnlyList<string> args, TimeSpan timeout, CancellationToken ct)
     {
