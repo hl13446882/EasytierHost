@@ -1,0 +1,88 @@
+<Window x:Class="EasyTierHost.Client.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EasyTierHost Client" Height="620" Width="760"
+        MinHeight="560" MinWidth="680" WindowStartupLocation="CenterScreen">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,18">
+            <TextBlock Text="EasyTierHost 普通客户端" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="虚拟网 10.10.0.0/16 · 客户端地址由 DHCP 从 10.10.0.11 起分配" Foreground="DimGray" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <Border Grid.Row="1" BorderBrush="#D0D0D0" BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Windows 服务" Foreground="DimGray" />
+                    <TextBlock Text="{Binding ServiceState}" FontSize="16" FontWeight="SemiBold" />
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Overlay IP" Foreground="DimGray" />
+                    <TextBlock Text="{Binding OverlayIp}" FontSize="16" FontWeight="SemiBold" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Internet Gateway" Foreground="DimGray" />
+                    <TextBlock Text="{Binding GatewayState}" FontSize="16" FontWeight="SemiBold" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Seed Physical IP" FontWeight="SemiBold" />
+            <TextBox Text="{Binding SeedPhysicalIp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Seed 的公网/物理 IPv4，不是 10.10.0.0/16 Overlay 地址" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                <Button Content="连接" Click="Connect_Click" />
+                <Button Content="断开" Click="Disconnect_Click" />
+                <Button Content="重新连接" Click="Reconnect_Click" />
+                <Button Content="刷新状态" Click="Refresh_Click" />
+                <Button Content="诊断" Click="Diagnostics_Click" />
+            </StackPanel>
+        </StackPanel>
+
+        <Expander Grid.Row="3" Header="高级设置" IsExpanded="False" Margin="0,0,0,16">
+            <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Column="0" Grid.Row="0">
+                    <TextBlock Text="Network Name" />
+                    <TextBox Text="{Binding NetworkName, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Grid.Row="0">
+                    <TextBlock Text="Network Secret" />
+                    <PasswordBox x:Name="NetworkSecret" ToolTip="首次连接必填；后续留空将沿用本机 DPAPI 保护的 secret" />
+                </StackPanel>
+                <CheckBox Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="1"
+                          IsChecked="{Binding EnableInternetGateway}"
+                          Content="通过 10.10.0.1 使用 Internet Gateway / DNS（失败时自动保持物理网络）" />
+            </Grid>
+        </Expander>
+
+        <Border Grid.Row="4" Background="#F5F5F5" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontWeight="SemiBold" />
+        </Border>
+
+        <TextBox Grid.Row="5" Text="{Binding Details}" IsReadOnly="True" TextWrapping="Wrap"
+                 AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"
+                 ToolTip="诊断/错误摘要。Network secret 不会写入此处。" />
+    </Grid>
+</Window>
