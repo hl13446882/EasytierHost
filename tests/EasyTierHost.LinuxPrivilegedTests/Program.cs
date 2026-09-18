@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Text.Json;
 using EasyTierHost.Abstractions;
 using EasyTierHost.Core;
 using EasyTierHost.Gateway;
@@ -13,6 +14,13 @@ static void Check(bool condition, string message)
 static NetworkInterface GetNic(string name) =>
     NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => n.Name == name)
     ?? throw new InvalidOperationException($"Network interface not found: {name}");
+
+static async Task<GatewayJournal> ReadJournalAsync(string path)
+{
+    await using var stream = File.OpenRead(path);
+    return await JsonSerializer.DeserializeAsync<GatewayJournal>(stream, ConfigurationStore.Json)
+        ?? throw new InvalidDataException("Gateway journal was empty");
+}
 
 if (!OperatingSystem.IsLinux())
 {
@@ -79,36 +87,74 @@ var physical = new RouteSnapshot(
     []);
 var overlay = new GatewayAdapter(overlayIndex, overlayName, overlayNic.Id, overlayIpv4.ToString());
 var nat = new LinuxNatManager(runner);
-var platform = await nat.CaptureAsync(physical, overlay, CancellationToken.None);
-var expectedForwarding = platform.GlobalForwardingEnabled ? "1" : "0";
-var natCreated = false;
+var temp = Path.Combine(Path.GetTempPath(), "eth-linux-privileged-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(temp);
+var journalPath = Path.Combine(temp, "gateway-journal.json");
+
+async Task<CommandResult> ClientPingAsync(int count, int timeoutSeconds) =>
+    await runner.RunAsync("ip",
+        ["netns", "exec", clientNamespace, "ping", "-c", count.ToString(), "-W", timeoutSeconds.ToString(), physicalGateway],
+        CancellationToken.None);
+
 try
 {
-    await nat.EnableForwardingAsync(platform, CancellationToken.None);
+    var controlPing = await ClientPingAsync(1, 1);
+    Check(controlPing.ExitCode != 0, "Control packet unexpectedly succeeded before gateway activation");
 
-    var controlPing = await runner.RunAsync("ip",
-        ["netns", "exec", clientNamespace, "ping", "-c", "1", "-W", "1", physicalGateway],
-        CancellationToken.None);
-    Check(controlPing.ExitCode != 0, "Control packet unexpectedly succeeded before NAT was installed");
+    // Normal lifecycle: Start -> real nft/sysctl packet flow -> Stop -> full rollback.
+    var normalDns = new FakeDnsRuntime();
+    var normal = new GatewayBootstrapper(nat, normalDns, journalPath);
+    await normal.StartAsync(physical, overlay, CancellationToken.None);
+    Check(normal.State == GatewayServerState.Ready, "Gateway bootstrapper did not reach Ready");
+    Check(normalDns.Active, "DNS runtime was not started");
+    Check(File.Exists(journalPath), "Gateway journal was not persisted while active");
+    var normalJournal = await ReadJournalAsync(journalPath);
+    Check(await nat.VerifyAsync(normalJournal.Snapshot, CancellationToken.None), "Linux NAT verification failed after bootstrapper start");
+    Check((await ClientPingAsync(2, 2)).ExitCode == 0, "Forwarded client packet did not traverse the gateway NAT path");
 
-    await nat.CreateNatAsync(platform, CancellationToken.None);
-    natCreated = true;
-    Check(await nat.VerifyAsync(platform, CancellationToken.None), "Linux NAT verification failed after creation");
+    await normal.StopAsync(CancellationToken.None);
+    Check(normal.State == GatewayServerState.Stopped, "Gateway bootstrapper did not stop cleanly");
+    Check(!normalDns.Active, "DNS runtime was not stopped");
+    Check(!File.Exists(journalPath), "Gateway journal remained after normal stop");
+    Check(!await nat.VerifyAsync(normalJournal.Snapshot, CancellationToken.None), "NAT resources remained after normal stop");
+    var restoredForwarding = (await runner.CheckedAsync("sysctl", ["-n", "net.ipv4.ip_forward"], CancellationToken.None)).Trim();
+    Check(restoredForwarding == (normalJournal.Snapshot.GlobalForwardingEnabled ? "1" : "0"), "IPv4 forwarding state was not restored after normal stop");
+    Check((await ClientPingAsync(1, 1)).ExitCode != 0, "Client packet still traversed after normal rollback");
 
-    var forwardedPing = await runner.RunAsync("ip",
-        ["netns", "exec", clientNamespace, "ping", "-c", "2", "-W", "2", physicalGateway],
-        CancellationToken.None);
-    Check(forwardedPing.ExitCode == 0, "Forwarded client packet did not traverse the gateway NAT path");
+    // Crash-recovery lifecycle: leave the first coordinator active, then let a fresh coordinator
+    // recover only from the durable journal, matching a new Host process after power/process loss.
+    var crashedDns = new FakeDnsRuntime();
+    var crashed = new GatewayBootstrapper(nat, crashedDns, journalPath);
+    await crashed.StartAsync(physical, overlay, CancellationToken.None);
+    Check(crashed.State == GatewayServerState.Ready && File.Exists(journalPath), "Crash-recovery setup did not become active");
+    var crashJournal = await ReadJournalAsync(journalPath);
+    Check((await ClientPingAsync(2, 2)).ExitCode == 0, "Crash-recovery setup did not forward traffic");
+
+    var recoveryDns = new FakeDnsRuntime();
+    var recovery = new GatewayBootstrapper(nat, recoveryDns, journalPath);
+    await recovery.RecoverAsync(CancellationToken.None);
+    Check(recovery.State == GatewayServerState.Stopped, "Fresh bootstrapper did not finish journal recovery");
+    Check(!File.Exists(journalPath), "Gateway journal remained after crash recovery");
+    Check(!await nat.VerifyAsync(crashJournal.Snapshot, CancellationToken.None), "NAT resources remained after crash recovery");
+    restoredForwarding = (await runner.CheckedAsync("sysctl", ["-n", "net.ipv4.ip_forward"], CancellationToken.None)).Trim();
+    Check(restoredForwarding == (crashJournal.Snapshot.GlobalForwardingEnabled ? "1" : "0"), "IPv4 forwarding state was not restored after crash recovery");
+    Check((await ClientPingAsync(1, 1)).ExitCode != 0, "Client packet still traversed after crash recovery");
+    await crashedDns.DisposeAsync();
 }
 finally
 {
-    if (natCreated) await nat.RemoveNatAsync(platform, CancellationToken.None);
-    await nat.RestoreForwardingAsync(platform, CancellationToken.None);
+    if (File.Exists(journalPath)) File.Delete(journalPath);
+    Directory.Delete(temp, recursive: true);
 }
 
-var restoredForwarding = (await runner.CheckedAsync("sysctl", ["-n", "net.ipv4.ip_forward"], CancellationToken.None)).Trim();
-Check(restoredForwarding == expectedForwarding, "IPv4 forwarding state was not restored");
-Check(!await nat.VerifyAsync(platform, CancellationToken.None), "NAT resources remained after cleanup");
-
-Console.WriteLine("PASS privileged Linux route, forwarding, nftables NAT and packet-flow test");
+Console.WriteLine("PASS privileged Linux route, forwarding, nftables NAT, packet-flow and journal recovery test");
 return 0;
+
+sealed class FakeDnsRuntime : IGatewayDnsRuntime
+{
+    public bool Active { get; private set; }
+    public Task StartAsync(CancellationToken ct) { Active = true; return Task.CompletedTask; }
+    public Task<bool> CheckAsync(CancellationToken ct) => Task.FromResult(Active);
+    public Task StopAsync(CancellationToken ct) { Active = false; return Task.CompletedTask; }
+    public ValueTask DisposeAsync() { Active = false; return ValueTask.CompletedTask; }
+}
