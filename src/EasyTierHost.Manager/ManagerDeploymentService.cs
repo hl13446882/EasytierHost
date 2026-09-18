@@ -1,3 +1,4 @@
+using System.Net;
 using EasyTierHost.Abstractions;
 using EasyTierHost.Core;
 using EasyTierHost.Deployment;
@@ -26,7 +27,7 @@ public sealed class ManagerDeploymentService
     {
         try
         {
-            ValidateManagerOptions(options, requirePackage: false);
+            ValidateRemoteOptions(options);
             var credential = Credential(options);
             await using var remote = RemoteExecutorFactory.Create(credential);
             return await remote.TestConnectionAsync(ct)
@@ -40,7 +41,7 @@ public sealed class ManagerDeploymentService
 
     public async Task<DeploymentResult> InstallAsync(ManagerDeploymentOptions options, CancellationToken ct = default)
     {
-        ValidateManagerOptions(options, requirePackage: true);
+        ValidateManagerOptions(options);
         var workspace = Path.Combine(Path.GetTempPath(), "easytier-host-manager-" + Guid.NewGuid().ToString("N"));
         await SecretProvider.SecureDirectoryAsync(workspace, ct);
         try
@@ -100,16 +101,25 @@ public sealed class ManagerDeploymentService
         return profile;
     }
 
-    private static void ValidateManagerOptions(ManagerDeploymentOptions options, bool requirePackage)
+    private static void ValidateRemoteOptions(ManagerDeploymentOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (string.IsNullOrWhiteSpace(options.RemotePhysicalIp)) throw new HostException("ETH003", "Remote physical IP is required");
+        if (!IPAddress.TryParse(options.RemotePhysicalIp, out var remote) || remote.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || OverlayAddressPlan.IsOverlay(remote) || IPAddress.IsLoopback(remote))
+            throw new HostException("ETH003", "Remote physical IP must be a non-overlay IPv4 address");
         if (options.SshPort is < 1 or > 65535) throw new HostException("ETH003", "SSH port is out of range");
         if (string.IsNullOrWhiteSpace(options.Username)) throw new HostException("ETH003", "SSH username is required");
+        if (!string.IsNullOrWhiteSpace(options.PrivateKeyPath) && !File.Exists(Path.GetFullPath(options.PrivateKeyPath)))
+            throw new HostException("ETH003", "SSH private key file does not exist");
+    }
+
+    private static void ValidateManagerOptions(ManagerDeploymentOptions options)
+    {
+        ValidateRemoteOptions(options);
         if (string.IsNullOrWhiteSpace(options.NetworkName)) throw new HostException("ETH003", "Network name is required");
         if (string.IsNullOrWhiteSpace(options.NetworkSecret)) throw new HostException("ETH003", "Network secret is required");
+        if (options.NetworkSecret.IndexOfAny(['\r', '\n', '\0']) >= 0) throw new HostException("ETH003", "Network secret must be a single line");
         if (options.ListenerPort is < 1 or > 65535) throw new HostException("ETH003", "Listener port is out of range");
-        if (requirePackage && !Directory.Exists(options.LocalPackageDirectory)) throw new HostException("ETH003", "Local package directory does not exist");
+        if (!Directory.Exists(options.LocalPackageDirectory)) throw new HostException("ETH003", "Local package directory does not exist");
         if (options.Role is NodeRole.Gateway or NodeRole.Dedicated or NodeRole.Client)
         {
             if (string.IsNullOrWhiteSpace(options.SeedPhysicalIp)) throw new HostException("ETH003", "Seed physical IP is required for non-Seed nodes");
