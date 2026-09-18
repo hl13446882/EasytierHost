@@ -47,7 +47,7 @@ try
     var api = new FakeRouteApi();
     var snapshot = await DiagnosticsCollector.CollectAsync(profile, temp, new FakeRunner(), api);
     Check(snapshot.BuildId == "0.2.0" && snapshot.CoreBase == "2.6.4", "build identity missing");
-    Check(snapshot.RuntimeState == "ClientGatewayStarting" && snapshot.CorePid == 1234, "runtime status was not read");
+    Check(snapshot.RuntimeState == "ClientGatewayActive" && snapshot.CorePid == 1234, "active client runtime state was not normalized");
     Check(snapshot.GatewayState == "GatewayActive", "gateway status was not read");
     Check(snapshot.PhysicalIpv4 == "192.168.1.20" && snapshot.PhysicalGateway == "192.168.1.1", "physical network missing");
     Check(snapshot.OverlayIp == "10.10.0.11", "Core overlay address missing");
@@ -58,7 +58,19 @@ try
     var json = JsonSerializer.Serialize(snapshot, ConfigurationStore.Json);
     Check(!json.Contains("must-never-be-persisted", StringComparison.Ordinal), "unexpected exception message leaked into diagnostics");
     Check(!json.Contains("must-never-appear.secret", StringComparison.Ordinal), "secret file path leaked into diagnostics");
-    Console.WriteLine("PASS structured diagnostics, route metrics, protected endpoints and sanitized error history");
+
+    var seedProfile = profile with
+    {
+        Role = NodeRole.Seed,
+        SeedPhysicalIp = null,
+        EnableInternetGateway = false
+    };
+    var seedSnapshot = await DiagnosticsCollector.CollectAsync(seedProfile, null, new FakeRunner(), api);
+    Check(seedSnapshot.OverlayIp is null && seedSnapshot.OverlayInterface is null, "Seed diagnostics adopted an Overlay address");
+    Check(seedSnapshot.GatewayState == "NotApplicable", "Seed gateway state changed");
+    Check(DiagnosticsCollector.NormalizeRuntimeState(profile, "ClientGatewayStarting", "Pending") == "ClientGatewayStarting", "pending state was incorrectly normalized");
+
+    Console.WriteLine("PASS structured diagnostics, normalized state, Seed isolation, route metrics, protected endpoints and sanitized error history");
     return 0;
 }
 finally
