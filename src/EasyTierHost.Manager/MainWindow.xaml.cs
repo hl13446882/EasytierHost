@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        RefreshSeedPackage();
         RefreshSpecialDisplay();
     }
 
@@ -27,6 +28,8 @@ public partial class MainWindow : Window
     private async void DedicatedInstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("部署专用服务器", ct => _deployment.InstallAsync(BuildDedicatedOptions(includeSecret: true), ct));
 
+    private void SeedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSeedPackage();
+    private void DedicatedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSpecialDisplay();
     private void DedicatedIndex_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSpecialDisplay();
 
     private ManagerDeploymentOptions BuildSeedOptions(bool includeSecret) => new()
@@ -91,6 +94,16 @@ public partial class MainWindow : Window
             _operation.Dispose();
             _operation = null;
         }
+    }
+
+    private void RefreshSeedPackage()
+    {
+        if (SeedOs is null || SeedPackageDirectory is null) return;
+        var os = SelectedOs(SeedOs);
+        var suffix = os == ServerOsType.Windows ? "windows" : "linux";
+        var current = SeedPackageDirectory.Text.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(current) || current.StartsWith("publish/seed-", StringComparison.OrdinalIgnoreCase))
+            SeedPackageDirectory.Text = $"publish/seed-{suffix}";
     }
 
     private void RefreshSpecialDisplay()
