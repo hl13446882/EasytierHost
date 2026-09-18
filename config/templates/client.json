@@ -9,5 +9,5 @@
   "cliPath": "easytier-cli",
   "rpcPort": 15888,
   "deviceName": "easytierhost",
-  "enableInternetGateway": false
+  "enableInternetGateway": true
 }

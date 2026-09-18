@@ -11,6 +11,14 @@ public sealed class GatewayBootstrapper(IGatewayPlatform platform, IGatewayDnsRu
     private GatewayJournal? journal;
     public GatewayServerState State { get; private set; } = GatewayServerState.Stopped;
     private Task SaveAsync(CancellationToken ct) => ConfigurationStore.SaveAtomicAsync(journalPath, journal!, ct);
+    private static async Task Step(string name, Func<Task> action)
+    {
+        try { await action(); }
+        catch (Exception ex) when (ex is not HostException and not OperationCanceledException)
+        {
+            throw new HostException("ETH202", $"{name} failed");
+        }
+    }
 
     public async Task RecoverAsync(CancellationToken ct = default)
     {
@@ -36,18 +44,23 @@ public sealed class GatewayBootstrapper(IGatewayPlatform platform, IGatewayDnsRu
             if (overlay.Address != OverlayAddressPlan.Gateway || overlay.Index <= 0 || overlay.Index == physical.PhysicalInterfaceIndex)
                 throw new HostException("ETH201", "Gateway TUN must be ready on a separate interface");
             State = GatewayServerState.Preparing;
-            journal = new(await platform.CaptureAsync(physical, overlay, ct), false, false);
+            try { journal = new(await platform.CaptureAsync(physical, overlay, ct), false, false); }
+            catch (Exception ex) when (ex is not HostException and not OperationCanceledException) { throw new HostException("ETH202", "gateway capture failed"); }
             await SaveAsync(ct);
             journal = journal with { ForwardingMayHaveChanged = true };
             await SaveAsync(ct);
-            await platform.EnableForwardingAsync(journal.Snapshot, ct);
+            await Step("forwarding", () => platform.EnableForwardingAsync(journal.Snapshot, ct));
             journal = journal with { NatMayExist = true };
             await SaveAsync(ct);
-            await platform.CreateNatAsync(journal.Snapshot, ct);
+            await Step("WinNAT", () => platform.CreateNatAsync(journal.Snapshot, ct));
             State = GatewayServerState.DnsStarting;
-            await dns.StartAsync(ct);
-            if (!await platform.VerifyAsync(journal.Snapshot, ct) || !await dns.CheckAsync(ct))
-                throw new HostException("ETH202", "Gateway NAT/forwarding/DNS health check failed");
+            await Step("gateway DNS", () => dns.StartAsync(ct));
+            try
+            {
+                if (!await platform.VerifyAsync(journal.Snapshot, ct) || !await dns.CheckAsync(ct))
+                    throw new HostException("ETH202", "Gateway NAT/forwarding/DNS health check failed");
+            }
+            catch (Exception ex) when (ex is not HostException and not OperationCanceledException) { throw new HostException("ETH202", "gateway verify failed"); }
             State = GatewayServerState.Ready;
         }
         catch

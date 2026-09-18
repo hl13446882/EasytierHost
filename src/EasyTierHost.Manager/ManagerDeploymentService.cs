@@ -132,7 +132,7 @@ public sealed class ManagerDeploymentService
             CorePath = "easytier-core",
             CliPath = "easytier-cli",
             DeviceName = "easytierhost",
-            EnableInternetGateway = false
+            EnableInternetGateway = options.Role == NodeRole.Client
         };
         NetworkProfileValidator.Validate(profile);
         return profile;

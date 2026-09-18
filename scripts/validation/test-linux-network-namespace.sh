@@ -13,7 +13,7 @@ done
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd -- "$script_dir/../.." && pwd)"
 configuration="${CONFIGURATION:-Release}"
-dll="$repo/tests/EasyTierHost.LinuxPrivilegedTests/bin/$configuration/net8.0/EasyTierHost.LinuxPrivilegedTests.dll"
+dll="$repo/tests/EasyTierHost.LinuxPrivilegedTests/bin/$configuration/net10.0/EasyTierHost.LinuxPrivilegedTests.dll"
 if [[ ! -f "$dll" ]]; then
   echo "missing test binary: $dll" >&2
   echo "build tests/EasyTierHost.LinuxPrivilegedTests first" >&2

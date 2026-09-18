@@ -15,7 +15,7 @@
                        Text="Overlay: 10.10.0.0/16；Gateway/DNS: 10.10.0.1；专用服务器: 10.10.0.2-10；普通客户端 DHCP: 10.10.0.11-10.10.255.254" />
         </StackPanel>
 
-        <TabControl Grid.Row="1">
+        <TabControl x:Name="MainTabs" Grid.Row="1">
             <TabItem Header="Seed 服务器">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid Margin="14">
@@ -61,7 +61,7 @@
                         <TextBox x:Name="SeedPackageDirectory" Grid.Row="8" Grid.Column="1" Text="publish/seed-linux" />
 
                         <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Foreground="DimGray" TextWrapping="Wrap"
-                                   Text="Seed 只负责 EasyTier 虚拟网协调，不占用 10.10.0.0 作为 TUN 地址，不提供网关、DNS 或 NAT。当前远程执行使用 OpenSSH Key/ssh-agent，不把 SSH 密码放入命令行。" />
+                                   Text="Seed 只负责 EasyTier 虚拟网协调，不占用 10.10.0.0 作为 TUN 地址，不提供网关、DNS 或 NAT。当前远程执行使用 OpenSSH Key/ssh-agent，不把 SSH 密码放入命令行。本地发布包目录会按本机 publish/release 布局自动填充；Windows 目标默认用户名为 Administrator。" />
 
                         <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
                             <Button Content="测试连接" Click="SeedTestConnection_Click" />
@@ -140,13 +140,73 @@
 
                         <StackPanel Grid.Row="12" Grid.ColumnSpan="2">
                             <TextBlock Foreground="DimGray" TextWrapping="Wrap"
-                                       Text="序号 1 固定为 10.10.0.1，并强制作为 Gateway + DNS + Internet 出口；序号 2-10 仅作为静态 Overlay 专用服务器，不启用 NAT、DNS 或 Exit Node。Gateway 与 2-10 专用服务器共用 dedicated 发布包，由配置角色决定运行行为。" />
+                                       Text="序号 1 固定为 10.10.0.1，并强制作为 Gateway + DNS + Internet 出口；序号 2-10 仅作为静态 Overlay 专用服务器，不启用 NAT、DNS 或 Exit Node。Gateway 与 2-10 专用服务器共用 dedicated 发布包，由配置角色决定运行行为。本地发布包目录会按本机 publish/release 布局自动填充。" />
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="测试连接" Click="DedicatedTestConnection_Click" />
                                 <Button Content="诊断" Click="DedicatedDiagnostics_Click" />
                                 <Button Content="安装 / 重新部署" Click="DedicatedInstall_Click" />
                                 <Button Content="卸载" Click="DedicatedUninstall_Click" />
                             </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="普通客户端">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="系统" VerticalAlignment="Center" />
+                        <ComboBox x:Name="ClientOs" Grid.Row="0" Grid.Column="1" SelectedIndex="1" SelectionChanged="ClientOs_SelectionChanged">
+                            <ComboBoxItem Content="Linux" Tag="Linux" />
+                            <ComboBoxItem Content="Windows" Tag="Windows" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="远程物理 IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientRemoteIp" Grid.Row="1" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="SSH 端口" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientSshPort" Grid.Row="2" Grid.Column="1" Text="22" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="SSH 用户名" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientUsername" Grid.Row="3" Grid.Column="1" Text="Administrator" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="SSH 私钥路径（可空，使用 Agent）" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientPrivateKey" Grid.Row="4" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Seed 物理 IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientSeedPhysicalIp" Grid.Row="5" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Network Name" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientNetworkName" Grid.Row="6" Grid.Column="1" Text="company-overlay" />
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Network Secret" VerticalAlignment="Center" />
+                        <PasswordBox x:Name="ClientNetworkSecret" Grid.Row="7" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Listener Port" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientListenerPort" Grid.Row="8" Grid.Column="1" Text="11010" />
+
+                        <TextBlock Grid.Row="9" Grid.Column="0" Text="本地发布包目录" VerticalAlignment="Center" />
+                        <TextBox x:Name="ClientPackageDirectory" Grid.Row="9" Grid.Column="1" Text="publish/client-windows" />
+
+                        <TextBlock Grid.Row="10" Grid.ColumnSpan="2" Foreground="DimGray" TextWrapping="Wrap"
+                                   Text="普通客户端由 DHCP 从 10.10.0.11 起分配 Overlay IP；网关/DNS 为 10.10.0.1。本地用户也可用发布包内 install-client.ps1 / uninstall-client.ps1，无需本机图形界面。远程卸载会停止服务并删除远端程序与配置。" />
+
+                        <StackPanel Grid.Row="11" Grid.ColumnSpan="2" Orientation="Horizontal">
+                            <Button Content="测试连接" Click="ClientTestConnection_Click" />
+                            <Button Content="诊断" Click="ClientDiagnostics_Click" />
+                            <Button Content="安装虚拟网" Click="ClientInstall_Click" />
+                            <Button Content="卸载虚拟网" Click="ClientUninstall_Click" />
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>

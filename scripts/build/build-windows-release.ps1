@@ -29,7 +29,7 @@ function Invoke-Native([scriptblock] $Action, [string] $Label) {
 }
 
 Assert-RelativeOutput $OutputRoot
-Assert-Command 'dotnet' 'Install .NET 8 SDK or newer.'
+Assert-Command 'dotnet' 'Install .NET 10 SDK.'
 Assert-Command 'cargo' 'Install Rust stable with rustup.'
 Assert-Command 'rustup' 'Install Rust with rustup.'
 Assert-Command 'protoc' 'Install Protocol Buffers compiler and add it to PATH.'
@@ -93,12 +93,7 @@ try {
 
     foreach ($role in $roles) {
         $out = "$OutputRoot/$role"
-        if ($role -eq 'client-windows') {
-            & $publishWindows -CoreDirectory $coreDir -OutputDirectory $out -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration -IncludeClientUi
-        }
-        else {
-            & $publishWindows -CoreDirectory $coreDir -OutputDirectory $out -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration
-        }
+        & $publishWindows -CoreDirectory $coreDir -OutputDirectory $out -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration
         $kind = if ($role -eq 'client-windows') { 'client-windows' } else { 'server-windows' }
         & $verify -PackageDirectory $out -ExpectedPackageKind $kind
     }
@@ -107,7 +102,18 @@ try {
     $managerOut = Join-Path $repo $managerOutRel
     if (Test-Path -LiteralPath $managerOut) { Remove-Item -LiteralPath $managerOut -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $managerOut | Out-Null
-    Invoke-Native { dotnet publish src/EasyTierHost.Manager/EasyTierHost.Manager.csproj -c $Configuration -r $RuntimeIdentifier --self-contained true --nologo -o $managerOut } 'Manager publish'
+    Invoke-Native { dotnet publish src/EasyTierHost.Manager/EasyTierHost.Manager.csproj -c $Configuration -r $RuntimeIdentifier --self-contained false --nologo -p:DebugType=None -p:DebugSymbols=false -o $managerOut } 'Manager publish'
+    Get-ChildItem -LiteralPath $managerOut -Filter '*.pdb' -File -Recurse | Remove-Item -Force
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/windows/ensure-dotnet-runtime.ps1') -Destination (Join-Path $managerOut 'ensure-dotnet-runtime.ps1') -Force
+    $managerLauncher = @(
+        '@echo off'
+        'setlocal'
+        'set "HERE=%~dp0"'
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HERE%ensure-dotnet-runtime.ps1" -WindowsDesktop'
+        'if errorlevel 1 exit /b 1'
+        'start "" "%HERE%EasyTierHost.Manager.exe"'
+    )
+    Set-Content -LiteralPath (Join-Path $managerOut 'EasyTierHost.Manager.cmd') -Value $managerLauncher -Encoding ascii
     & $metadata -PackageDirectory $managerOut -RuntimeIdentifier $RuntimeIdentifier -PackageKind 'manager-windows'
     & $verify -PackageDirectory $managerOut -ExpectedPackageKind 'manager-windows'
 

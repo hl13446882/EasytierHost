@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - name: Build Host solution
         run: dotnet build EasyTierHost.sln --nologo
       - name: Build deployment project
@@ -46,7 +46,7 @@ jobs:
           if ($failed) { exit 1 }
       - name: Parse Linux scripts
         shell: bash
-        run: bash -n scripts/build/build-linux-release.sh scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/validation/collect-linux.sh
+        run: bash -n scripts/build/build-linux-release.sh scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/linux/ensure-dotnet-runtime.sh scripts/validation/collect-linux.sh
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run client profile tests
@@ -67,7 +67,7 @@ jobs:
           Set-Content -LiteralPath (Join-Path $winCore 'easytier-cli.exe') -Value 'CI package sentinel cli' -NoNewline
           Set-Content -LiteralPath (Join-Path $linuxCore 'easytier-core') -Value 'CI package sentinel core' -NoNewline
           Set-Content -LiteralPath (Join-Path $linuxCore 'easytier-cli') -Value 'CI package sentinel cli' -NoNewline
-          ./scripts/publish/publish-windows.ps1 -CoreDirectory $winCore -OutputDirectory 'publish/ci-client-windows' -IncludeClientUi
+          ./scripts/publish/publish-windows.ps1 -CoreDirectory $winCore -OutputDirectory 'publish/ci-client-windows'
           ./scripts/publish/verify-package.ps1 -PackageDirectory 'publish/ci-client-windows' -ExpectedPackageKind 'client-windows'
           ./scripts/publish/publish-linux.ps1 -CoreDirectory $linuxCore -OutputDirectory 'publish/ci-client-linux'
           ./scripts/publish/verify-package.ps1 -PackageDirectory 'publish/ci-client-linux' -ExpectedPackageKind 'node-linux'
@@ -90,13 +90,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - name: Build Host solution on Linux
         run: dotnet build EasyTierHost.sln --nologo
       - name: Build deployment project on Linux
         run: dotnet build src/EasyTierHost.Deployment/EasyTierHost.Deployment.csproj --nologo
       - name: Parse Linux scripts on Linux
-        run: bash -n scripts/build/build-linux-release.sh scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/validation/collect-linux.sh
+        run: bash -n scripts/build/build-linux-release.sh scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/linux/ensure-dotnet-runtime.sh scripts/validation/collect-linux.sh
       - name: Run Host unit tests on Linux
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run client profile tests on Linux

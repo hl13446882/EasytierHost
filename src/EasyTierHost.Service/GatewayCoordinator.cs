@@ -68,7 +68,9 @@ public sealed class GatewayCoordinator(IRouteApi routes, IGatewayPlatform platfo
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new HostException("ETH201", "Gateway TUN readiness timed out"); }
         }
-        var physical = await routes.CaptureAsync(ct);
+        RouteSnapshot physical;
+        try { physical = await routes.CaptureAsync(ct); }
+        catch (Exception ex) when (ex is not HostException and not OperationCanceledException) { throw new HostException("ETH202", "Physical capture failed"); }
         await using var dns = new GatewayDnsRuntime(new(IPAddress.Parse(OverlayAddressPlan.Gateway), 53), ResolveUpstreams(profile, physical));
         var bootstrapper = new GatewayBootstrapper(platform, dns, JournalPath);
         try

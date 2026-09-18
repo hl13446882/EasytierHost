@@ -7,6 +7,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $package = [IO.Path]::GetFullPath($PackageDirectory)
+
+function Get-PackageRelativePath([string] $Root, [string] $FullName) {
+    $rootFull = [IO.Path]::GetFullPath($Root)
+    if (-not $rootFull.EndsWith([string][IO.Path]::DirectorySeparatorChar)) {
+        $rootFull += [IO.Path]::DirectorySeparatorChar
+    }
+    $full = [IO.Path]::GetFullPath($FullName)
+    if ($full.Length -lt $rootFull.Length -or -not $full.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside package: $FullName"
+    }
+    return $full.Substring($rootFull.Length).Replace('\', '/')
+}
 $manifestPath = Join-Path $package 'artifact-manifest.json'
 $shaPath = Join-Path $package 'sha256.txt'
 $versionPath = Join-Path $package 'version.txt'
@@ -43,7 +55,7 @@ $actual = @(
         ForEach-Object {
             [pscustomobject]@{
                 FullName = $_.FullName
-                Path = [IO.Path]::GetRelativePath($package, $_.FullName).Replace('\','/')
+                Path = Get-PackageRelativePath $package $_.FullName
                 Length = $_.Length
             }
         }
@@ -81,10 +93,10 @@ if ($shaEntries.Count -ne ($actual.Count - 1)) { throw 'sha256.txt contains unex
 
 $windowsRuntime = @('Packet.dll','wintun.dll')
 $required = switch ([string]$manifest.PackageKind) {
-    'manager-windows' { @('EasyTierHost.Manager.exe','version.txt','sha256.txt') }
-    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','client-ui/EasyTierHost.Client.Windows.exe','version.txt','sha256.txt') }
-    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','version.txt','sha256.txt') }
-    'node-linux' { @('easytier-host','easytier-core','easytier-cli','scripts/linux/install-service.sh','scripts/linux/uninstall-service.sh','version.txt','sha256.txt') }
+    'manager-windows' { @('EasyTierHost.Manager.exe','EasyTierHost.Manager.cmd','ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
+    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/install-client.ps1','scripts/windows/uninstall-client.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
+    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
+    'node-linux' { @('easytier-host','easytier-core','easytier-cli','scripts/linux/install-service.sh','scripts/linux/uninstall-service.sh','scripts/linux/client-control.sh','scripts/linux/ensure-dotnet-runtime.sh','version.txt','sha256.txt') }
     default { throw "Unknown package kind: $($manifest.PackageKind)" }
 }
 foreach ($relative in $required) {

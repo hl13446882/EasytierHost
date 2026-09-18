@@ -49,10 +49,21 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         try
         {
             DeploymentValidation.ValidateRemotePath(request.RemoteInstallDirectory);
-            var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, "scripts/linux/uninstall-service.sh");
-            var script = $"chmod 700 {Bash(uninstaller)} && {Bash(uninstaller)} {Bash(request.ServiceName)} {Bash(request.RemoteStateDirectory)} false";
+            string script;
+            if (request.Role == NodeRole.Client)
+            {
+                var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, "scripts/linux/client-control.sh");
+                script = $"chmod 700 {Bash(uninstaller)} && {Bash(uninstaller)} uninstall";
+            }
+            else
+            {
+                var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, "scripts/linux/uninstall-service.sh");
+                script = $"chmod 700 {Bash(uninstaller)} && {Bash(uninstaller)} {Bash(request.ServiceName)} {Bash(request.RemoteStateDirectory)} false";
+            }
             var result = await remote.ExecuteAsync(RootShell(request, script), ct);
-            return result.Success ? DeploymentResult.Ok("Linux service uninstalled") : DeploymentResult.Fail("ETH402", "Linux remote uninstall failed");
+            return result.Success
+                ? DeploymentResult.Ok(request.Role == NodeRole.Client ? "Linux virtual network uninstalled" : "Linux service uninstalled")
+                : DeploymentResult.Fail("ETH402", "Linux remote uninstall failed");
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
     }
@@ -114,6 +125,8 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine("if [[ -d \"$install/scripts/linux\" ]]; then find \"$install/scripts/linux\" -maxdepth 1 -type f -name '*.sh' -exec chmod 700 -- {} +; fi");
         sb.AppendLine("cp -- \"$staged_profile\" \"$profile\"");
         sb.AppendLine("chmod 600 -- \"$profile\" \"$staged_secret\"");
+        sb.AppendLine("DOTNET_ROOT=\"$(\"$install/scripts/linux/ensure-dotnet-runtime.sh\" \"$install\")\"");
+        sb.AppendLine("export DOTNET_ROOT PATH=\"$DOTNET_ROOT:$PATH\"");
         sb.AppendLine("\"$install/easytier-host\" set-secret \"$secret\" < \"$staged_secret\"");
         sb.AppendLine("rm -f -- \"$staged_secret\"");
         sb.AppendLine("chmod 600 -- \"$secret\"");

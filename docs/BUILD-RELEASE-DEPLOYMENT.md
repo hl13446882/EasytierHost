@@ -39,7 +39,7 @@ EasyTierHost/
 
 需要：
 
-- .NET SDK 8.0 或更高；
+- .NET SDK 10.0；
 - Rust stable / Cargo，建议通过 rustup 安装；
 - Visual Studio 2022 Build Tools，含 MSVC C++ linker；
 - `protoc`；
@@ -67,7 +67,7 @@ sudo apt-get install -y \
   protobuf-compiler pkg-config build-essential mold curl tar
 ```
 
-还需要：.NET SDK 8.0+、Rust stable、Git、PowerShell 7 (`pwsh`)。
+还需要：.NET SDK 10.0、Rust stable、Git、PowerShell 7 (`pwsh`)。
 
 EasyTier 的 Linux Cargo 配置使用 `-fuse-ld=mold`，所以正式 Linux Release 构建必须存在 `mold`。
 
@@ -91,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build/build-windows-release.ps1
 2. 运行 Host/Client/Diagnostics/Integration/Deployment 测试；
 3. 运行 EasyTier DHCP 与 Underlay 针对性 Rust 测试；
 4. Release 编译 patched `easytier-core.exe`、`easytier-cli.exe`；
-5. 生成 Seed、Dedicated、Client、Manager 包；
+5. 生成 Seed、Dedicated、Client、Manager 包（framework-dependent，不内嵌 .NET 运行时）；
 6. Windows 节点包加入匹配架构的 `Packet.dll` 与 `wintun.dll`；
 7. 生成 `version.txt`、`sha256.txt`、`artifact-manifest.json`；
 8. 对全部发布包执行结构、长度和 SHA-256 校验；
@@ -141,11 +141,7 @@ publish/release/
 └─ archives/
 ```
 
-Windows Client 包额外包含：
-
-```text
-client-ui/EasyTierHost.Client.Windows.exe
-```
+Windows Client 包包含 `scripts/windows/install-client.ps1` 与 `scripts/windows/uninstall-client.ps1`。普通用户不需要图形界面。远程管理使用 `publish/release/manager`。发布目录不含 Client WPF 与 PDB。
 
 节点包内不得人工增加 `network.secret`、`core.toml` 或其他未进入 manifest 的文件。部署器会拒绝未登记、多余、缺失、长度不匹配或 SHA-256 不匹配的包。
 
@@ -245,7 +241,25 @@ Copy-Item '.\network.secret' "$config\network.secret" -Force
   -StateDirectory $state
 ```
 
-安装脚本会先校验 profile，再创建/更新 `EasyTierHost` SCM 服务，使用 LocalSystem，设置 **Automatic (Delayed Start)**、失败自动重启和 Preshutdown 清理时间。
+安装脚本会先确认本机已有 .NET 10 运行时（缺失则从 Microsoft 官方源下载安装），再校验 profile，然后创建/更新 `EasyTierHost` SCM 服务，使用 LocalSystem，设置 **Automatic (Delayed Start)**、失败自动重启和 Preshutdown 清理时间。
+
+普通用户客户端不要手工写 profile，也不需要图形界面。解压 `client-windows` 后执行：
+
+```powershell
+$pkg = 'D:\EasyTierHost\publish\release\client-windows'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pkg\scripts\windows\install-client.ps1" `
+  -SeedPhysicalIp 141.164.40.70 `
+  -NetworkName company-overlay `
+  -SecretFromFile C:\secure\network.secret
+```
+
+`install-client.ps1` 会复制程序、写入 Client profile（`enableInternetGateway=true`）、通过 stdin 交给 `set-secret`、安装服务，并等待 DHCP 分配 `10.10.0.11+` Overlay 地址。随后 Host 把网关和 DNS 指定为 `10.10.0.1`。secret 不得出现在命令行参数中。
+
+卸载虚拟网：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramFiles\EasyTierHost\scripts\windows\uninstall-client.ps1"
+```
 
 检查：
 
@@ -282,6 +296,14 @@ sudo /opt/easytier-host/scripts/linux/install-service.sh \
 ```
 
 systemd 使用 `Restart=always`，并在正常停止时给 Host 30 秒清理路由/NAT/DNS 与 recovery journal。
+
+普通 Linux 客户端解压 `client-linux` 到 `/opt/easytier-host` 后，不走图形界面：
+
+```bash
+printf '%s\n' "$SECRET" | sudo /opt/easytier-host/scripts/linux/client-control.sh install 141.164.40.70 company-overlay
+```
+
+会写入 Client profile、经 stdin 保存 secret、安装 systemd 服务，并由 DHCP 分配 Overlay IP；网关/DNS 为 `10.10.0.1`。
 
 检查：
 

@@ -14,6 +14,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         RefreshSeedPackage();
         RefreshSpecialDisplay();
+        RefreshClientPackage();
+        ApplyDefaultUsername(SeedOs, SeedUsername);
+        ApplyDefaultUsername(DedicatedOs, DedicatedUsername);
+        ApplyDefaultUsername(ClientOs, ClientUsername);
     }
 
     private async void SeedTestConnection_Click(object sender, RoutedEventArgs e) =>
@@ -40,8 +44,40 @@ public partial class MainWindow : Window
     private async void DedicatedUninstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("卸载专用服务器", ct => _deployment.UninstallAsync(BuildDedicatedOptions(includeSecret: false), ct));
 
-    private void SeedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSeedPackage();
-    private void DedicatedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSpecialDisplay();
+    private async void ClientTestConnection_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("测试普通客户端 SSH", ct => _deployment.TestConnectionAsync(BuildClientOptions(includeSecret: false), ct));
+
+    private async void ClientDiagnostics_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("读取普通客户端诊断", ct => _deployment.DiagnosticsAsync(BuildClientOptions(includeSecret: false), ct));
+
+    private async void ClientInstall_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("安装虚拟网", ct => _deployment.InstallAsync(BuildClientOptions(includeSecret: true), ct));
+
+    private async void ClientUninstall_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "将远程停止并卸载该主机上的 EasyTierHost 虚拟网（服务、配置与程序）。继续？", "卸载虚拟网", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        await RunOperationAsync("卸载虚拟网", ct => _deployment.UninstallAsync(BuildClientOptions(includeSecret: false), ct));
+    }
+
+    private void SeedOs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshSeedPackage();
+        ApplyDefaultUsername(SeedOs, SeedUsername);
+    }
+
+    private void DedicatedOs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshSpecialDisplay();
+        ApplyDefaultUsername(DedicatedOs, DedicatedUsername);
+    }
+
+    private void ClientOs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RefreshClientPackage();
+        ApplyDefaultUsername(ClientOs, ClientUsername);
+    }
+
     private void DedicatedIndex_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSpecialDisplay();
 
     private ManagerDeploymentOptions BuildSeedOptions(bool includeSecret) => new()
@@ -78,6 +114,21 @@ public partial class MainWindow : Window
         };
     }
 
+    private ManagerDeploymentOptions BuildClientOptions(bool includeSecret) => new()
+    {
+        OsType = SelectedOs(ClientOs),
+        Role = NodeRole.Client,
+        RemotePhysicalIp = ClientRemoteIp.Text.Trim(),
+        SshPort = ParsePort(ClientSshPort.Text, "Client SSH port"),
+        Username = ClientUsername.Text.Trim(),
+        PrivateKeyPath = EmptyToNull(ClientPrivateKey.Text),
+        SeedPhysicalIp = ClientSeedPhysicalIp.Text.Trim(),
+        NetworkName = ClientNetworkName.Text.Trim(),
+        NetworkSecret = includeSecret ? ClientNetworkSecret.Password : "connection-test-placeholder",
+        ListenerPort = ParsePort(ClientListenerPort.Text, "Client listener port"),
+        LocalPackageDirectory = ClientPackageDirectory.Text.Trim()
+    };
+
     private async Task RunOperationAsync(string name, Func<CancellationToken, Task<DeploymentResult>> operation)
     {
         if (_operation is not null)
@@ -87,6 +138,7 @@ public partial class MainWindow : Window
         }
 
         _operation = new CancellationTokenSource();
+        if (MainTabs is not null) MainTabs.IsEnabled = false;
         try
         {
             AppendLog($"[{DateTime.Now:HH:mm:ss}] {name}...\n");
@@ -97,12 +149,17 @@ public partial class MainWindow : Window
         {
             AppendLog($"[{DateTime.Now:HH:mm:ss}] 操作已取消。\n");
         }
+        catch (HostException ex)
+        {
+            AppendLog($"[{DateTime.Now:HH:mm:ss}] {ex.Code}: {ex.Message}\n");
+        }
         catch (Exception ex)
         {
             AppendLog($"[{DateTime.Now:HH:mm:ss}] ERROR: {ex.GetType().Name}\n");
         }
         finally
         {
+            if (MainTabs is not null) MainTabs.IsEnabled = true;
             _operation.Dispose();
             _operation = null;
         }
@@ -112,10 +169,9 @@ public partial class MainWindow : Window
     {
         if (SeedOs is null || SeedPackageDirectory is null) return;
         var os = SelectedOs(SeedOs);
-        var suffix = os == ServerOsType.Windows ? "windows" : "linux";
-        var current = SeedPackageDirectory.Text.Replace('\\', '/');
-        if (string.IsNullOrWhiteSpace(current) || current.StartsWith("publish/seed-", StringComparison.OrdinalIgnoreCase))
-            SeedPackageDirectory.Text = $"publish/seed-{suffix}";
+        var located = PackageDirectoryLocator.Locate("seed", os);
+        if (PackageDirectoryLocator.IsManagedPath(SeedPackageDirectory.Text, "seed"))
+            SeedPackageDirectory.Text = located;
     }
 
     private void RefreshSpecialDisplay()
@@ -126,10 +182,34 @@ public partial class MainWindow : Window
         if (DedicatedPackageDirectory is not null)
         {
             var os = DedicatedOs is null ? ServerOsType.Linux : SelectedOs(DedicatedOs);
-            var suffix = os == ServerOsType.Windows ? "windows" : "linux";
-            var current = DedicatedPackageDirectory.Text.Replace('\\', '/');
-            if (string.IsNullOrWhiteSpace(current) || current.StartsWith("publish/gateway-", StringComparison.OrdinalIgnoreCase) || current.StartsWith("publish/dedicated-", StringComparison.OrdinalIgnoreCase))
-                DedicatedPackageDirectory.Text = $"publish/dedicated-{suffix}";
+            var located = PackageDirectoryLocator.Locate("dedicated", os);
+            if (PackageDirectoryLocator.IsManagedPath(DedicatedPackageDirectory.Text, "dedicated")
+                || PackageDirectoryLocator.IsManagedPath(DedicatedPackageDirectory.Text, "gateway"))
+                DedicatedPackageDirectory.Text = located;
+        }
+    }
+
+    private void RefreshClientPackage()
+    {
+        if (ClientOs is null || ClientPackageDirectory is null) return;
+        var located = PackageDirectoryLocator.Locate("client", SelectedOs(ClientOs));
+        if (PackageDirectoryLocator.IsManagedPath(ClientPackageDirectory.Text, "client"))
+            ClientPackageDirectory.Text = located;
+    }
+
+    private static void ApplyDefaultUsername(ComboBox os, TextBox username)
+    {
+        if (os is null || username is null) return;
+        var selected = SelectedOs(os);
+        var current = username.Text.Trim();
+        if (selected == ServerOsType.Windows)
+        {
+            if (string.IsNullOrWhiteSpace(current) || current.Equals("root", StringComparison.OrdinalIgnoreCase))
+                username.Text = "Administrator";
+        }
+        else if (string.IsNullOrWhiteSpace(current) || current.Equals("Administrator", StringComparison.OrdinalIgnoreCase))
+        {
+            username.Text = "root";
         }
     }
 

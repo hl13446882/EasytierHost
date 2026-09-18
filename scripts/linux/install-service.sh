@@ -10,6 +10,12 @@ if [[ ${EUID} -ne 0 ]]; then
   echo "root privileges are required" >&2
   exit 1
 fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+dotnet_root="$("$script_dir/ensure-dotnet-runtime.sh" "$install_root")"
+export DOTNET_ROOT="$dotnet_root"
+export PATH="$dotnet_root:${PATH:-}"
+
 if [[ ! -x "$install_root/easytier-host" ]]; then
   echo "missing executable: $install_root/easytier-host" >&2
   exit 1
@@ -36,6 +42,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+Environment=DOTNET_ROOT=$dotnet_root
+Environment=PATH=$dotnet_root:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart="$install_root/easytier-host" run "$profile_path" "$state_dir"
 WorkingDirectory=$install_root
 Restart=always

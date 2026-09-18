@@ -2,7 +2,7 @@ param([string]$CorePath = '')
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $testDirectory = Join-Path $workspace ('tests/.configuration-' + [Guid]::NewGuid().ToString('N'))
-$hostDll = Join-Path $workspace 'src/EasyTierHost.Service/bin/Debug/net8.0/easytier-host.dll'
+$hostDll = Join-Path $workspace 'src/EasyTierHost.Service/bin/Debug/net10.0/easytier-host.dll'
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
 try {
     # Synthetic fixture, never a real network credential.

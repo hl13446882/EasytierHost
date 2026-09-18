@@ -48,10 +48,17 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         try
         {
             DeploymentValidation.ValidateRemotePath(request.RemoteInstallDirectory);
-            var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, "scripts/windows/uninstall-service.ps1");
-            var script = $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -ServiceName {Ps(request.ServiceName)} -StateDirectory {Ps(request.RemoteStateDirectory)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}";
+            var uninstallerRelative = request.Role == NodeRole.Client
+                ? "scripts/windows/uninstall-client.ps1"
+                : "scripts/windows/uninstall-service.ps1";
+            var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, uninstallerRelative);
+            var script = request.Role == NodeRole.Client
+                ? $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -Force -InstallRoot {Ps(request.RemoteInstallDirectory.Replace('\\', '/'))} -ServiceName {Ps(request.ServiceName)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}"
+                : $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -ServiceName {Ps(request.ServiceName)} -StateDirectory {Ps(request.RemoteStateDirectory)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}";
             var result = await remote.ExecuteAsync(PowerShell(script), ct);
-            return result.Success ? DeploymentResult.Ok("Windows service uninstalled") : DeploymentResult.Fail("ETH402", "Windows remote uninstall failed");
+            return result.Success
+                ? DeploymentResult.Ok(request.Role == NodeRole.Client ? "Windows virtual network uninstalled" : "Windows service uninstalled")
+                : DeploymentResult.Fail("ETH402", "Windows remote uninstall failed");
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
     }
@@ -109,6 +116,9 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         sb.AppendLine("  Move-Item -LiteralPath $incoming -Destination $install");
         sb.AppendLine("  Copy-Item -LiteralPath $stagedProfile -Destination $profile -Force");
         sb.AppendLine("  $hostExe=Join-Path $install 'easytier-host.exe'");
+        sb.AppendLine("  $ensureRuntime=Join-Path $install 'scripts/windows/ensure-dotnet-runtime.ps1'");
+        sb.AppendLine("  if (-not (Test-Path -LiteralPath $ensureRuntime -PathType Leaf)) { throw 'Package is missing scripts/windows/ensure-dotnet-runtime.ps1' }");
+        sb.AppendLine("  & $ensureRuntime -PackageRoot $install");
         sb.AppendLine("  Get-Content -LiteralPath $stagedSecret -Raw | & $hostExe set-secret $secret");
         sb.AppendLine("  if ($LASTEXITCODE -ne 0) { throw 'Remote secret provisioning failed' }");
         sb.AppendLine("  Remove-Item -LiteralPath $stagedSecret -Force");

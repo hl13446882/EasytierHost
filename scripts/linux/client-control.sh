@@ -11,11 +11,11 @@ host="$install_root/easytier-host"
 usage() {
   cat <<'EOF'
 Usage: client-control.sh <command> [args]
-  install [seed-ip] [network-name]   Configure and start a normal Client
+  install [seed-ip] [network-name]   Unattended Client install (secret on stdin if new)
   status                              Show systemd and Overlay readiness
   diagnostics                         Print EasyTierHost diagnostics
   reconnect                           Restart the Client service safely
-  uninstall                           Stop/disable service; keep profile/secret
+  uninstall                           Stop the Client, remove overlay config/state/program files
 EOF
 }
 
@@ -27,6 +27,13 @@ require_root() {
 }
 
 require_host() {
+  local ensure="$install_root/scripts/linux/ensure-dotnet-runtime.sh"
+  if [[ -f "$ensure" ]]; then
+    local root
+    root="$("$ensure" "$install_root")"
+    export DOTNET_ROOT="$root"
+    export PATH="$root:${PATH:-}"
+  fi
   if [[ ! -x "$host" ]]; then
     echo "missing executable: $host" >&2
     exit 1
@@ -39,7 +46,12 @@ install_client() {
   local seed="${1:-}"
   local network_name="${2:-company-overlay}"
   if [[ -z "$seed" ]]; then
-    read -r -p 'Seed physical IP: ' seed
+    if [[ -t 0 ]]; then
+      read -r -p 'Seed physical IP: ' seed
+    else
+      echo "Seed physical IP is required for unattended install" >&2
+      exit 2
+    fi
   fi
   if [[ ! "$seed" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
     echo "Seed must be an IPv4 address" >&2
@@ -56,12 +68,22 @@ install_client() {
 
   if [[ ! -f "$secret_path" ]]; then
     local secret confirm
-    read -r -s -p 'Network secret: ' secret; echo
-    read -r -s -p 'Confirm secret: ' confirm; echo
-    if [[ -z "$secret" || "$secret" != "$confirm" ]]; then
-      unset secret confirm
-      echo "network secret is empty or does not match" >&2
-      exit 2
+    if [[ -t 0 ]]; then
+      read -r -s -p 'Network secret: ' secret; echo
+      read -r -s -p 'Confirm secret: ' confirm; echo
+      if [[ -z "$secret" || "$secret" != "$confirm" ]]; then
+        unset secret confirm
+        echo "network secret is empty or does not match" >&2
+        exit 2
+      fi
+    else
+      IFS= read -r secret || true
+      secret="${secret%$'\r'}"
+      if [[ -z "$secret" ]]; then
+        unset secret
+        echo "unattended install requires the network secret on stdin" >&2
+        exit 2
+      fi
     fi
     printf '%s\n' "$secret" | "$host" set-secret "$secret_path"
     unset secret confirm
@@ -97,7 +119,7 @@ EOF
   for i in {1..60}; do
     if "$host" ready "$profile_path" >/dev/null 2>&1; then
       "$host" ready "$profile_path"
-      echo "Client connected. Internet gateway activation continues under Host health control."
+      echo "Client connected. Overlay IP assigned by DHCP; gateway/DNS is 10.10.0.1."
       return 0
     fi
     sleep 1
@@ -133,7 +155,21 @@ reconnect_client() {
 
 uninstall_client() {
   require_root
-  "$install_root/scripts/linux/uninstall-service.sh" "$service_name" "$state_dir" false
+  local uninstaller="$install_root/scripts/linux/uninstall-service.sh"
+  if [[ -f "$uninstaller" ]]; then
+    bash "$uninstaller" "$service_name" "$state_dir" true
+  fi
+  rm -f -- "$profile_path" "$secret_path"
+  local config_dir
+  config_dir="$(dirname "$profile_path")"
+  case "$config_dir" in
+    /etc/easytier-host|/etc/easytier-host/*) rm -rf -- "$config_dir" ;;
+  esac
+  case "$install_root" in
+    /opt/easytier-host) rm -rf -- "$install_root" ;;
+    *) echo "left program files at $install_root" ;;
+  esac
+  echo "Virtual network uninstalled. Service, profile, secret, state and program files were removed."
 }
 
 case "${1:-}" in

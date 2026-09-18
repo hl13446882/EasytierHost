@@ -1,12 +1,12 @@
 # EasyTierHost
 
-基于 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。当前开发分支已覆盖受限 DHCP、四角色配置、Host 进程守护、Gateway NAT/forwarding/DNS 生命周期、Underlay 防递归、Client Internet 路由事务、Windows SCM/Linux systemd 服务化、SSH 远程部署、管理端 WPF、普通 Windows/Linux 客户端控制入口、结构化诊断以及发布包完整性校验。**Seed + Gateway + 两个 Client 的多节点实机验收仍未完成，因此 Internet Gateway 仍属于预览功能，不能视为生产放行。**具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
+基于 EasyTier 2.6.4 源码实现的 **0.2**。虚拟网主功能（四角色、DHCP、Gateway/DNS `10.10.0.1`、普通客户端自动入网）已冻结，后续只修缺陷与发布物，不再扩展 Overlay 行为。Internet Gateway 多机抓包验收仍未完成，不能视为生产放行。具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
 
 完整的编译、发布与部署流程见：[编译、发布与部署说明书](docs/BUILD-RELEASE-DEPLOYMENT.md)。仓库已提供 Windows/Linux 一键 Release 构建脚本，并支持 `rc-*` tag 自动触发 GitHub Release Candidate 编译。
 
 ## 构建与测试
 
-需要 .NET 8+ SDK、Rust stable、Windows C++ 链接工具；Windows 构建 Core 时需要 7-Zip 在 PATH 中。依赖恢复需要联网。
+需要 .NET 10 SDK、Rust stable、Windows C++ 链接工具；Windows 构建 Core 时需要 7-Zip 在 PATH 中。依赖恢复需要联网。发布包不内嵌 .NET 运行时；目标机器在安装时若缺少 .NET 10 会自动下载安装。
 
 Windows 一键 Release：
 
@@ -71,31 +71,52 @@ Client 的 `enableInternetGateway=false` 时只加入虚拟局域网；设为 `t
 
 ## Windows 普通客户端
 
-规范发布包 `publish/client-windows` 中包含 Host/Core/CLI、`Packet.dll`、`wintun.dll`、服务脚本以及：
+普通用户**不需要图形界面**。解压 `publish/client-windows` 后，以管理员身份静默安装即可：服务自动启动、DHCP 从 `10.10.0.11` 起分配 Overlay IP，Host 在虚拟网就绪后把网关和 DNS 指定为 `10.10.0.1`。
 
-```text
-client-ui/EasyTierHost.Client.Windows.exe
+```powershell
+$pkg = 'D:\EasyTierHost\publish\release\client-windows'
+# secret 走 stdin / 文件，不要放进命令行参数
+Get-Content -LiteralPath C:\secure\network.secret -TotalCount 1 |
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pkg\scripts\windows\install-client.ps1" `
+    -SeedPhysicalIp 141.164.40.70 `
+    -NetworkName company-overlay
+
+# 或
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pkg\scripts\windows\install-client.ps1" `
+  -SeedPhysicalIp 141.164.40.70 `
+  -NetworkName company-overlay `
+  -SecretFromFile C:\secure\network.secret
 ```
 
-客户端 UI 以管理员权限运行，只负责配置和控制 `EasyTierHost` Windows Service；**UI 自身不直接启动 Core，也不直接修改默认路由或 DNS**。首次连接填写 Seed Physical IP、Network Name、Network Secret；Secret 写入 ProgramData 私有目录并使用 DPAPI 保护。连接后客户端地址由 DHCP 从 `.11` 起分配。关闭 UI 不等于停止虚拟网；“断开”会正常停止服务，让 Host 完成路由/DNS 回滚。诊断按钮会把结构化 JSON 转成物理出口、Overlay、Peer、Gateway、路由总跃点和最近错误的可读摘要，原始异常敏感文本不会展示或持久化。
+安装脚本会把程序复制到 `C:\Program Files\EasyTierHost`，把 profile/secret 写入 `C:\ProgramData\EasyTierHost\config`，创建并启动 `EasyTierHost` 服务。关闭安装窗口不影响虚拟网。卸载虚拟网（停止服务并删除程序与配置）：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramFiles\EasyTierHost\scripts\windows\uninstall-client.ps1"
+```
+
+也可从发布包运行同一脚本。输入 `Y` 确认；远程/无人值守加 `-Force`。
 
 ## Linux 普通客户端
 
 Linux 发布包提供 `scripts/linux/client-control.sh`。安装目录为 `/opt/easytier-host` 时可执行：
 
 ```bash
-sudo /opt/easytier-host/scripts/linux/client-control.sh install
+printf '%s\n' "$SECRET" | sudo /opt/easytier-host/scripts/linux/client-control.sh install 141.164.40.70 company-overlay
 sudo /opt/easytier-host/scripts/linux/client-control.sh status
 sudo /opt/easytier-host/scripts/linux/client-control.sh diagnostics
 sudo /opt/easytier-host/scripts/linux/client-control.sh reconnect
 sudo /opt/easytier-host/scripts/linux/client-control.sh uninstall
 ```
 
-首次 `install` 交互输入 Seed Physical IP 和 network secret；secret 经 stdin 交给 Host，不出现在进程参数中。服务由 systemd 管理。远程 Linux 安装器会在上传完成后只对已知 Host/Core/CLI 与自有 `.sh` 恢复 execute bit，以兼容从 Windows 生成/上传发布包的场景。
+首次 `install` 必须带上 Seed 物理 IP；新机器的 network secret 从 stdin 读入（不出现在进程参数中）。TTY 下仍可交互输入。服务由 systemd 管理。远程 Linux 安装器会在上传完成后只对已知 Host/Core/CLI 与自有 `.sh` 恢复 execute bit，以兼容从 Windows 生成/上传发布包的场景。
+
+```bash
+printf '%s\n' "$SECRET" | sudo /opt/easytier-host/scripts/linux/client-control.sh install 141.164.40.70 company-overlay
+```
 
 ## 管理端与远程部署
 
-`EasyTierHost.Manager` 用于配置和部署 Seed、Gateway `10.10.0.1` 及 Dedicated `10.10.0.2–10.10.0.10`。远程部署走 OpenSSH，先上传到私有 staging，校验 artifact manifest/SHA-256，再事务式替换程序、profile 与 secret；新节点在规定时间内未达到角色 readiness 时自动尝试恢复旧版本。
+`EasyTierHost.Manager` 用于配置和部署 Seed、Gateway `10.10.0.1`、Dedicated `10.10.0.2–10.10.0.10`，以及普通客户端虚拟网。远程部署走 OpenSSH，先上传到私有 staging，校验 artifact manifest/SHA-256，再事务式替换程序、profile 与 secret；新节点在规定时间内未达到角色 readiness 时自动尝试恢复旧版本。普通客户端页提供 **安装虚拟网** / **卸载虚拟网**（卸载会停止远端服务并删除程序与配置）。
 
 Windows 使用 SCM；Linux 使用 systemd。Gateway 与 Dedicated 共用 dedicated 二进制发布布局，通过 profile 的 Role 决定 `.1` Gateway 或 `.2–.10` Dedicated 行为，避免维护两套二进制。
 
@@ -112,19 +133,20 @@ scripts/publish/publish-all.ps1 `
 生成：
 
 ```text
-publish/manager
-publish/seed-windows
-publish/seed-linux
-publish/dedicated-windows
-publish/dedicated-linux
-publish/client-windows
-publish/client-linux
+publish/release/manager
+publish/release/seed-windows
+publish/release/seed-linux
+publish/release/dedicated-windows
+publish/release/dedicated-linux
+publish/release/client-windows
+publish/release/client-linux
+publish/release/archives
 ```
 
-`publish/client-windows` 额外包含 `client-ui`；所有 Windows 节点包同时包含匹配架构的 `Packet.dll` 与 `wintun.dll`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
+`publish/` 只保留上述发布物：二进制、原生运行时、安装/卸载脚本、配置模板与校验元数据，不含 Client WPF、PDB 或开发中间目录。`publish/release/client-windows` 含 Host/Core/CLI、`install-client.ps1` 与 `uninstall-client.ps1`；`publish/release/manager` 为远程部署 UI（含卸载虚拟网）。所有 Windows 节点包同时包含匹配架构的 `Packet.dll` 与 `wintun.dll`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
 
 ```powershell
-scripts/publish/verify-package.ps1 -PackageDirectory publish/client-windows -ExpectedPackageKind client-windows
+scripts/publish/verify-package.ps1 -PackageDirectory publish/release/client-windows -ExpectedPackageKind client-windows
 ```
 
 校验 manifest 路径、文件数量、长度、SHA-256、必需组件和 Windows TUN 原生运行时，并拒绝把 `.secret` 或 `core.toml` 打进发布包。日常 CI 中的发布 smoke 使用 sentinel Core/CLI 只验证发布管线和完整性算法；正式候选包必须使用真实 Release Core/CLI 构建。

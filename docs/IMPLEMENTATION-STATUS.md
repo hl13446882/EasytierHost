@@ -1,6 +1,6 @@
-# 实施状态（2026-09-18，0.2）
+# 实施状态（2026-09-18，0.2 功能冻结）
 
-第一版代码功能已经覆盖开发方案的主链路：Overlay 基础、网关生命周期、客户端 Internet 路由事务、Underlay 防递归、Windows/Linux 服务化、SSH 事务式远程部署、管理端 WPF、普通客户端控制入口、结构化诊断、发布包完整性校验以及自动 Release 构建。当前剩余的主要门槛已经从“功能开发”转为**真实多机验收**；`enableInternetGateway=true` 必须完成 Windows/Linux Seed + Gateway + 两个 Client 的抓包、切网、断电恢复与长期稳定性验收后才能视为生产可用。
+虚拟网主链路（四角色、DHCP、Gateway/DNS `10.10.0.1`、普通客户端脚本入网/卸载、Manager 远程部署）已冻结：只修缺陷与发布物，不再扩展 Overlay 行为。当前剩余门槛是真实多机验收；`enableInternetGateway=true` 必须完成 Windows/Linux Seed + Gateway + 两个 Client 的抓包、切网、断电恢复与长期稳定性验收后才能视为生产可用。
 
 | 模块 | 已实现 | 尚需完成 |
 |---|---|---|
@@ -14,10 +14,10 @@
 | 客户端 DNS / Probe | Windows 自有 NRPT、Linux resolved 指定链路、DNS/HTTPS 源地址探测、激活后周期健康探测 | 两平台真实 DNS、代理/VPN 共存和故障恢复验收 |
 | Underlay | TCP/UDP、STUN、打洞、发现 DNS 的显式物理 IPv4 绑定；Host 启动前捕获物理 IPv4 并传入 Core；保护模式拒绝 RPC `patch_config` 与 RPC 新建/覆盖实例 | 网卡切换、多节点抓包验证 Seed/Relay/STUN/新 endpoint/DNS |
 | Diagnostics | 稳定 JSON 合同；Build/Core/Role/Runtime、物理出口、Overlay、Peer、Gateway、DNS、Windows Route/Interface/Total Metric、受保护 endpoint、脱敏 recentErrors；活动 Gateway/Client 运行态规范化；Seed 不采纳无关 `10.10/16` 网卡 | 实机诊断字段校准、长期错误历史/日志联动 |
-| Windows Client | WPF 普通客户端入口、Seed IP/Network/Secret 配置、DPAPI secret、连接/断开/重连/状态；诊断已格式化物理网络/Overlay/Peer/Gateway/路由/错误摘要；UI 只控制 Host Service，不拥有路由 | 实机安装、UAC、开关网关、休眠与升级体验验收 |
-| Linux Client | `client-control.sh` install/status/diagnostics/reconnect/uninstall；secret stdin；systemd | Linux 实机首次安装、切网、重启与发行版兼容验证 |
+| Windows Client | 普通用户用 `install-client.ps1` / `uninstall-client.ps1` 静默安装与卸载虚拟网；DHCP `.11+`，网关/DNS `10.10.0.1`；WPF 控制台不进入发布包 | 实机安装、卸载、休眠与升级体验验收 |
+| Linux Client | `client-control.sh` install/status/diagnostics/reconnect/uninstall（uninstall 删除服务、profile、secret、state）；secret stdin；systemd | Linux 实机首次安装、卸载、切网、重启与发行版兼容验证 |
 | 远程部署 | OpenSSH、SHA-256 manifest、私有 staging、profile/secret 事务替换、readiness、失败恢复；Linux 上传后恢复已知执行文件 execute bit | 多台真实 Windows Server/Linux 远程升级/回滚验收 |
-| Manager | WPF 管理端；Seed、Gateway、Dedicated 配置与远程安装/卸载/诊断；远程诊断包含实际 state directory | UI 易用性、批量部署/状态刷新与真实环境验收 |
+| Manager | WPF 管理端；Seed、Gateway、Dedicated、普通客户端远程安装/卸载虚拟网/诊断；远程诊断包含实际 state directory | UI 易用性、批量部署/状态刷新与真实环境验收 |
 | 发布 | Windows/Linux/Manager 统一 `version.txt`、`sha256.txt`、`artifact-manifest.json`；manifest 校验长度/哈希/路径/必需文件并拒绝 secret/core.toml；Windows 包强制携带匹配架构 `Packet.dll`/`wintun.dll`；Windows/Linux 一键 Release 构建脚本；`rc-*` tag 自动 Release Candidate | 在目标 Windows/Linux 上安装候选包并完成真实 Core、驱动、服务、升级验收 |
 | 实机验收工具 | Windows/Linux 证据采集脚本、Windows 角色/路由契约断言、`FOUR-NODE-VALIDATION.md` 四节点 Case A–H | 实际执行 Seed + Gateway + C1 + C2 两平台矩阵并归档证据 |
 | CI | Windows Host/Deployment/Manager/Client 编译与全套测试；Ubuntu 原生 Host/Deployment 编译及测试；PowerShell/Bash 语法检查；Windows/Linux package/manifest smoke；EasyTier DHCP/Underlay Rust 测试；隔离 Linux network namespace 中真实 route/sysctl/nftables/iptables/NAT/packet-flow/journal recovery | Windows 管理员级真实网络集成环境、跨公网多机验收 |
@@ -32,7 +32,7 @@ Client 设置 `enableInternetGateway=true` 时，Host 会在 Core 启动前捕�
 
 `diagnostics <network.json> [state-directory]` 输出固定结构。提供 state directory 时会读取当前 `status.json`、Gateway 状态和最近脱敏错误；Windows 额外计算 `/0`、`/1` 的 `RouteMetric + InterfaceMetric`。若角色协调器已经进入 `GatewayReady`/`GatewayActive`，诊断会把旧的 Starting 状态规范化为当前活动态。Seed 明确视为 TUN-less，即使主机上其它软件恰好拥有 `10.10/16` 地址也不会作为 Seed Overlay 输出。诊断不会读取或输出 network secret，也不会持久化未知异常的原始 Message；未知异常只保存类型名称。
 
-Windows 普通客户端使用提升权限的 WPF 程序配置 ProgramData 私有 profile/secret，再通过 SCM 启停 `EasyTierHost`。UI 不直接运行 Core、不写系统路由、不写 DNS；真正的 Underlay、Probe、Commit、Reconcile 和 rollback 仍在 Host 服务内。Internet Gateway 未及时激活时，Overlay 本身不应因此被 UI 强制断开，Host 保持物理默认出口并继续按自身故障逻辑处理。诊断 UI 消费结构化合同，而不是直接显示原始 JSON。
+Windows 普通客户端使用 `install-client.ps1` 配置 ProgramData 私有 profile/secret 并安装 `EasyTierHost` 服务；`uninstall-client.ps1` 停止服务并删除程序与配置。真正的 Underlay、Probe、Commit、Reconcile 和 rollback 仍在 Host 服务内。
 
 Linux 普通客户端通过 `scripts/linux/client-control.sh` 提供同类入口。远程 Linux 部署考虑发布包可能从 Windows 产生/上传、Unix execute bit 不可依赖，因此事务安装阶段只对 `easytier-host`、`easytier-core`、`easytier-cli` 及自有 Linux shell 脚本恢复执行权限，不递归放宽整个安装目录。Linux Gateway 优先使用 nftables；nft 不可用时才使用 EasyTierHost 自有 comment 标记的精确 iptables NAT 规则，卸载/恢复只删除本系统拥有的规则。
 

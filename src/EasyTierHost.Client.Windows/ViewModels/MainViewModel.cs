@@ -35,7 +35,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string SeedPhysicalIp { get => seedPhysicalIp; set => Set(ref seedPhysicalIp, value); }
     public string NetworkName { get => networkName; set => Set(ref networkName, value); }
     public bool EnableInternetGateway { get => enableInternetGateway; set => Set(ref enableInternetGateway, value); }
-    public bool IsBusy { get => isBusy; private set => Set(ref isBusy, value); }
+    public bool IsBusy
+    {
+        get => isBusy;
+        private set
+        {
+            if (!Set(ref isBusy, value)) return;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanOperate)));
+        }
+    }
+    public bool CanOperate => !isBusy;
     public string ServiceState { get => serviceState; private set => Set(ref serviceState, value); }
     public string OverlayIp { get => overlayIp; private set => Set(ref overlayIp, value); }
     public string GatewayState { get => gatewayState; private set => Set(ref gatewayState, value); }
@@ -163,10 +172,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ? ex.Message
         : $"{ex.GetType().Name}: operation failed";
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 }

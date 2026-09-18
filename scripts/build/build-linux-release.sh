@@ -43,7 +43,7 @@ cd "$ROOT"
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Required command '$1' not found. $2" >&2; exit 1; }
 }
-need dotnet "Install .NET 8 SDK or newer."
+need dotnet "Install .NET 10 SDK."
 need cargo "Install Rust stable with rustup."
 need rustup "Install Rust with rustup."
 need protoc "Install protobuf-compiler."

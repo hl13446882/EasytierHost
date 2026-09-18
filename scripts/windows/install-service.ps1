@@ -19,8 +19,31 @@ function Assert-Administrator {
 }
 
 function Invoke-Sc([Parameter(ValueFromRemainingArguments = $true)] [string[]] $Arguments) {
+    # sc.exe wants option name and value as two argv tokens: "start=" "delayed-auto".
+    # Do not pass "start= delayed-auto" as one quoted argument; that yields 1639.
     & "$env:SystemRoot\System32\sc.exe" @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "sc.exe failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')" }
+}
+
+function Set-ServiceBinaryPath([string] $Name, [string] $BinaryPath, [string] $Display) {
+    # sc.exe re-parses GetCommandLine() and treats extra quoted paths as surplus
+    # create tokens (1639). New-Service / Change() talk to SCM directly.
+    $existing = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+    if ($existing) {
+        $result = Invoke-CimMethod -InputObject $existing -MethodName Change -Arguments @{
+            PathName    = $BinaryPath
+            DisplayName = $Display
+            StartMode   = 'Automatic'
+            StartName   = 'LocalSystem'
+        }
+        if ($null -eq $result -or [int]$result.ReturnValue -ne 0) {
+            throw "Win32_Service.Change failed for '$Name' (ReturnValue=$($result.ReturnValue))."
+        }
+    }
+    else {
+        New-Service -Name $Name -BinaryPathName $BinaryPath -DisplayName $Display -StartupType Automatic | Out-Null
+    }
+    Invoke-Sc config $Name 'start=' 'delayed-auto' 'obj=' 'LocalSystem'
 }
 
 function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSeconds = 30) {
@@ -38,6 +61,10 @@ $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $ProfilePath = [IO.Path]::GetFullPath($ProfilePath)
 $StateDirectory = [IO.Path]::GetFullPath($StateDirectory)
 $exe = Join-Path $InstallRoot 'easytier-host.exe'
+$ensureRuntime = Join-Path $PSScriptRoot 'ensure-dotnet-runtime.ps1'
+if (Test-Path -LiteralPath $ensureRuntime -PathType Leaf) {
+    & $ensureRuntime -PackageRoot $InstallRoot
+}
 
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing service executable: $exe" }
 if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) { throw "Missing network profile: $ProfilePath" }
@@ -61,11 +88,8 @@ if ($exists) {
         if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop existing service '$ServiceName'." }
         Wait-ServiceState $ServiceName 'STOPPED'
     }
-    Invoke-Sc config $ServiceName 'binPath=' $binaryPath 'start=' delayed-auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
 }
-else {
-    Invoke-Sc create $ServiceName 'binPath=' $binaryPath 'start=' delayed-auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
-}
+Set-ServiceBinaryPath $ServiceName $binaryPath $DisplayName
 
 Invoke-Sc description $ServiceName 'EasyTierHost owns EasyTier Core, overlay gateway/DNS and transactional route recovery.'
 Invoke-Sc failure $ServiceName 'reset=' 120 'actions=' 'restart/5000/restart/5000/restart/10000'

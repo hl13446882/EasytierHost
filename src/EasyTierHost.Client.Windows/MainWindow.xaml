@@ -44,11 +44,11 @@
             <TextBlock Text="Seed Physical IP" FontWeight="SemiBold" />
             <TextBox Text="{Binding SeedPhysicalIp, UpdateSourceTrigger=PropertyChanged}" ToolTip="Seed 的公网/物理 IPv4，不是 10.10.0.0/16 Overlay 地址" />
             <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                <Button Content="连接" Click="Connect_Click" />
-                <Button Content="断开" Click="Disconnect_Click" />
-                <Button Content="重新连接" Click="Reconnect_Click" />
-                <Button Content="刷新状态" Click="Refresh_Click" />
-                <Button Content="诊断" Click="Diagnostics_Click" />
+                <Button Content="连接" Click="Connect_Click" IsEnabled="{Binding CanOperate}" />
+                <Button Content="断开" Click="Disconnect_Click" IsEnabled="{Binding CanOperate}" />
+                <Button Content="重新连接" Click="Reconnect_Click" IsEnabled="{Binding CanOperate}" />
+                <Button Content="刷新状态" Click="Refresh_Click" IsEnabled="{Binding CanOperate}" />
+                <Button Content="诊断" Click="Diagnostics_Click" IsEnabled="{Binding CanOperate}" />
             </StackPanel>
         </StackPanel>
 
@@ -73,7 +73,7 @@
                 </StackPanel>
                 <CheckBox Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="1"
                           IsChecked="{Binding EnableInternetGateway}"
-                          Content="通过 10.10.0.1 使用 Internet Gateway / DNS（失败时自动保持物理网络）" />
+                          Content="通过 10.10.0.1 使用网关 / DNS（由 Host 自动指定；失败时保持物理网络）" />
             </Grid>
         </Expander>
 

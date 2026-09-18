@@ -1,5 +1,4 @@
 using System.Net.NetworkInformation;
-using System.Text;
 using System.Text.Json;
 using EasyTierHost.Abstractions;
 using EasyTierHost.Core;
@@ -8,30 +7,81 @@ namespace EasyTierHost.Network;
 
 public sealed class WindowsRouteApi(CommandRunner runner) : IRouteApi
 {
-    internal Task<string> PowerShellAsync(string script, CancellationToken ct) => runner.CheckedAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes("$ErrorActionPreference='Stop'; " + script))], ct);
+    internal Task<string> PowerShellAsync(string script, CancellationToken ct) => PowerShellCommand.RunAsync(runner, script, ct);
     public async Task<IReadOnlyList<RouteEntry>> ListAsync(CancellationToken ct)
     {
-        var json = await PowerShellAsync("ConvertTo-Json -Compress -InputObject @(Get-NetRoute -AddressFamily IPv4 -PolicyStore ActiveStore | Select-Object DestinationPrefix,NextHop,InterfaceIndex,RouteMetric)", ct);
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.EnumerateArray().Select(r => new RouteEntry(r.GetProperty("DestinationPrefix").GetString()!, r.GetProperty("NextHop").GetString()!, r.GetProperty("InterfaceIndex").GetInt32(), r.GetProperty("RouteMetric").GetInt32()) { CreatedByEasyTierHost = false, OwnerTag = "" }).ToArray();
+        var json = await PowerShellAsync("""
+            $items = @(Get-NetRoute -AddressFamily IPv4 -PolicyStore ActiveStore | Select-Object DestinationPrefix,NextHop,InterfaceIndex,RouteMetric)
+            $json = ConvertTo-Json -Compress -InputObject $items
+            if ($items.Count -eq 1 -and $json.Length -gt 0 -and $json[0] -ne '[') { $json = "[$json]" }
+            $json
+            """, ct);
+        using var doc = JsonDocument.Parse(PowerShellCommand.ReadJson(json));
+        return AsArray(doc.RootElement).Select(r => new RouteEntry(
+            Text(r, "DestinationPrefix"),
+            Text(r, "NextHop"),
+            Int(r, "InterfaceIndex"),
+            Int(r, "RouteMetric")) { CreatedByEasyTierHost = false, OwnerTag = "" }).ToArray();
     }
     public async Task<RouteSnapshot> CaptureAsync(CancellationToken ct)
     {
         var json = await PowerShellAsync("""
             $physical = @(Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty ifIndex)
             $candidates = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | Where-Object { $_.InterfaceIndex -in $physical } | ForEach-Object {
-                $nic = Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $_.InterfaceIndex
-                [pscustomobject]@{ Route=$_; Metric=$nic.InterfaceMetric; Total=($_.RouteMetric + $nic.InterfaceMetric) }
+                $nic = @(Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $_.InterfaceIndex)[0]
+                [pscustomobject]@{ Route=$_; Metric=[int]$nic.InterfaceMetric; Total=($_.RouteMetric + [int]$nic.InterfaceMetric) }
             } | Sort-Object Total)
             if (!$candidates.Count) { throw 'No physical default route' }
             $best=$candidates[0]; $r=$best.Route
             $ip=Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $r.InterfaceIndex | Where-Object { $_.AddressState -eq 'Preferred' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -First 1
             if (!$ip) { throw 'No physical IPv4 address' }
-            [pscustomobject]@{ Name=$r.InterfaceAlias; Index=$r.InterfaceIndex; Ip=$ip.IPAddress; Gateway=$r.NextHop; Metric=$best.Metric; Dns=@((Get-DnsClientServerAddress -AddressFamily IPv4 -InterfaceIndex $r.InterfaceIndex).ServerAddresses) } | ConvertTo-Json -Compress
+            $dns=@(@((Get-DnsClientServerAddress -AddressFamily IPv4 -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue).ServerAddresses) | Where-Object { $_ })
+            [pscustomobject]@{ Name=$r.InterfaceAlias; Index=[int]$r.InterfaceIndex; Ip=$ip.IPAddress; Gateway=$r.NextHop; Metric=[int]$best.Metric; Dns=$dns } | ConvertTo-Json -Compress -Depth 5
             """, ct);
-        using var doc = JsonDocument.Parse(json); var x = doc.RootElement;
+        using var doc = JsonDocument.Parse(PowerShellCommand.ReadJson(json)); var x = doc.RootElement;
         var all = await ListAsync(ct);
-        return new(x.GetProperty("Name").GetString()!, x.GetProperty("Index").GetInt32(), x.GetProperty("Ip").GetString()!, x.GetProperty("Gateway").GetString()!, x.GetProperty("Metric").GetInt32(), all.Where(r => r.Destination == "0.0.0.0/0").ToArray(), all.Where(r => r.NextHop == "0.0.0.0").ToArray(), x.GetProperty("Dns").EnumerateArray().Select(s => s.GetString()!).ToArray());
+        return new(Text(x, "Name"), Int(x, "Index"), Text(x, "Ip"), Text(x, "Gateway"), Int(x, "Metric"), all.Where(r => r.Destination == "0.0.0.0/0").ToArray(), all.Where(r => r.NextHop == "0.0.0.0").ToArray(), Strings(x, "Dns"));
+    }
+    private static JsonElement[] AsArray(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Array => element.EnumerateArray().ToArray(),
+        JsonValueKind.Object => [element],
+        _ => throw new IOException("Expected JSON array")
+    };
+    private static JsonElement Prop(JsonElement element, string name)
+    {
+        if (element.TryGetProperty(name, out var value)) return value;
+        var camel = char.ToLowerInvariant(name[0]) + name[1..];
+        if (element.TryGetProperty(camel, out value)) return value;
+        throw new IOException("Missing JSON property " + name);
+    }
+    private static string Text(JsonElement element, string name)
+    {
+        var value = Prop(element, name);
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? "",
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.Array when value.GetArrayLength() > 0 => TextFrom(value[0]),
+            _ => throw new IOException("Expected string " + name)
+        };
+    }
+    private static string TextFrom(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText();
+    private static int Int(JsonElement element, string name)
+    {
+        var value = Prop(element, name);
+        if (value.ValueKind == JsonValueKind.Array && value.GetArrayLength() > 0) value = value[0];
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out number)) return number;
+        throw new IOException("Expected int " + name);
+    }
+    private static string[] Strings(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value) && !element.TryGetProperty(char.ToLowerInvariant(name[0]) + name[1..], out value))
+            return [];
+        if (value.ValueKind == JsonValueKind.String) return string.IsNullOrWhiteSpace(value.GetString()) ? [] : [value.GetString()!];
+        if (value.ValueKind == JsonValueKind.Array) return value.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() ?? "" : item.GetRawText()).Where(s => s.Length > 0).ToArray();
+        return [];
     }
     private static void Validate(RouteEntry r)
     {

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $CoreDirectory,
-    [string] $OutputDirectory = "publish/client-linux",
+    [string] $OutputDirectory = "publish/release/client-linux",
     [ValidateSet('linux-x64','linux-arm64')] [string] $RuntimeIdentifier = 'linux-x64',
     [string] $Configuration = 'Release'
 )
@@ -20,7 +20,8 @@ if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 & dotnet publish (Join-Path $repo 'src/EasyTierHost.Service/EasyTierHost.Service.csproj') `
-    -c $Configuration -r $RuntimeIdentifier --self-contained true --nologo -o $out
+    -c $Configuration -r $RuntimeIdentifier --self-contained false --nologo `
+    -p:DebugType=None -p:DebugSymbols=false -o $out
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 
 Copy-Item -LiteralPath $coreExe -Destination (Join-Path $out 'easytier-core') -Force
@@ -28,6 +29,7 @@ Copy-Item -LiteralPath $cliExe -Destination (Join-Path $out 'easytier-cli') -For
 New-Item -ItemType Directory -Force -Path (Join-Path $out 'scripts/linux') | Out-Null
 Copy-Item -Path (Join-Path $repo 'scripts/linux/*.sh') -Destination (Join-Path $out 'scripts/linux') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'config') -Destination (Join-Path $out 'config') -Recurse -Force
+Get-ChildItem -LiteralPath $out -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 # Script errors propagate. LASTEXITCODE may legitimately contain the result of an optional git probe.
 & (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
