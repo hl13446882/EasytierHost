@@ -31,7 +31,7 @@
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="服务器系统" VerticalAlignment="Center" />
-                        <ComboBox x:Name="SeedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0">
+                        <ComboBox x:Name="SeedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0" SelectionChanged="SeedOs_SelectionChanged">
                             <ComboBoxItem Content="Linux" Tag="Linux" />
                             <ComboBoxItem Content="Windows" Tag="Windows" />
                         </ComboBox>
@@ -87,7 +87,7 @@
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="服务器系统" VerticalAlignment="Center" />
-                        <ComboBox x:Name="DedicatedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0">
+                        <ComboBox x:Name="DedicatedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0" SelectionChanged="DedicatedOs_SelectionChanged">
                             <ComboBoxItem Content="Linux" Tag="Linux" />
                             <ComboBoxItem Content="Windows" Tag="Windows" />
                         </ComboBox>
@@ -134,7 +134,7 @@
                         <TextBox x:Name="DedicatedListenerPort" Grid.Row="10" Grid.Column="1" Text="11010" />
 
                         <TextBlock Grid.Row="11" Grid.Column="0" Text="本地发布包目录" VerticalAlignment="Center" />
-                        <TextBox x:Name="DedicatedPackageDirectory" Grid.Row="11" Grid.Column="1" Text="publish/dedicated-linux" />
+                        <TextBox x:Name="DedicatedPackageDirectory" Grid.Row="11" Grid.Column="1" Text="publish/gateway-linux" />
 
                         <StackPanel Grid.Row="12" Grid.ColumnSpan="2">
                             <TextBlock Foreground="DimGray" TextWrapping="Wrap"
