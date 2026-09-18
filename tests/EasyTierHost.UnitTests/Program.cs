@@ -9,6 +9,7 @@ var tests = new (string Name, Func<Task> Test)[]
 {
     ("Role configuration", Roles),
     ("Reject reserved client IPs", AddressPool),
+    ("Role-aware node readiness", Readiness),
     ("Reject invalid profiles", InvalidProfiles),
     ("Gateway commit and exact rollback", CommitRollback),
     ("Probe failure restores network", ProbeFailure),
@@ -56,6 +57,24 @@ static Task AddressPool()
 {
     foreach (var ip in new[] { "10.10.0.0", "10.10.0.1", "10.10.0.10", "10.10.255.255", "10.11.0.11", "::1" }) Check(!OverlayAddressPlan.IsClient(IPAddress.Parse(ip)));
     foreach (var ip in new[] { "10.10.0.11", "10.10.1.0", "10.10.255.254" }) Check(OverlayAddressPlan.IsClient(IPAddress.Parse(ip)));
+    return Task.CompletedTask;
+}
+static Task Readiness()
+{
+    static IPAddress Ip(string value) => IPAddress.Parse(value);
+    Check(NodeReadiness.Evaluate(Profile(NodeRole.Seed), []).Ready, "Seed without TUN should be ready");
+    Check(!NodeReadiness.Evaluate(Profile(NodeRole.Seed), [Ip("10.10.0.11")]).Ready, "Seed owning overlay IP was accepted");
+
+    Check(NodeReadiness.Evaluate(Profile(NodeRole.Gateway), [Ip("10.10.0.1")]).Ready, "Gateway .1 was rejected");
+    Check(!NodeReadiness.Evaluate(Profile(NodeRole.Gateway), [Ip("10.10.0.2")]).Ready, "Gateway with wrong IP was accepted");
+
+    Check(NodeReadiness.Evaluate(Profile(NodeRole.Dedicated), [Ip("10.10.0.3")]).Ready, "Dedicated expected IP was rejected");
+    Check(!NodeReadiness.Evaluate(Profile(NodeRole.Dedicated), [Ip("10.10.0.4")]).Ready, "Dedicated wrong IP was accepted");
+
+    Check(NodeReadiness.Evaluate(Profile(NodeRole.Client), [Ip("10.10.0.11")]).Ready, "Client DHCP start was rejected");
+    Check(NodeReadiness.Evaluate(Profile(NodeRole.Client), [Ip("10.10.255.254")]).Ready, "Client DHCP end was rejected");
+    Check(!NodeReadiness.Evaluate(Profile(NodeRole.Client), [Ip("10.10.0.2")]).Ready, "Client reserved IP was accepted");
+    Check(!NodeReadiness.Evaluate(Profile(NodeRole.Client), [Ip("10.10.0.11"), Ip("10.10.0.12")]).Ready, "Multiple overlay IPs were accepted");
     return Task.CompletedTask;
 }
 static async Task InvalidProfiles()
