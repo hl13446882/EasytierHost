@@ -1,0 +1,32 @@
+name: Linux Privileged Network
+
+on:
+  push:
+    branches:
+      - main
+      - dev/underlay-route-integration
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-privileged-network-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-network:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Install network namespace dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iproute2 nftables iputils-ping
+      - name: Build privileged Linux network test
+        run: dotnet build tests/EasyTierHost.LinuxPrivilegedTests/EasyTierHost.LinuxPrivilegedTests.csproj -c Release --nologo
+      - name: Run isolated Linux route/NAT packet-flow test
+        run: sudo env "PATH=$PATH" CONFIGURATION=Release bash scripts/validation/test-linux-network-namespace.sh
