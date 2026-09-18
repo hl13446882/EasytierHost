@@ -26,6 +26,8 @@ jobs:
         run: dotnet build EasyTierHost.sln --nologo
       - name: Build deployment project
         run: dotnet build src/EasyTierHost.Deployment/EasyTierHost.Deployment.csproj --nologo
+      - name: Build manager UI
+        run: dotnet build src/EasyTierHost.Manager/EasyTierHost.Manager.csproj --nologo
       - name: Parse PowerShell deployment scripts
         shell: pwsh
         run: |
