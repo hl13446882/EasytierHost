@@ -101,6 +101,39 @@ public sealed record DnsClientSnapshot(string Platform, int InterfaceIndex, stri
 public sealed record GatewayContext(int OverlayInterfaceIndex, string OverlayIp, IReadOnlyList<IPAddress> Endpoints,
     bool UnderlayProtectionVerified = false);
 public sealed record HealthStatus(bool UnderlayOk, bool SeedReachable, bool OverlayOk, bool GatewayReachable, bool DnsOk, bool InternetOk);
+
+/// <summary>Route metric view used only for diagnostics; it does not participate in route ownership equality.</summary>
+public sealed record RouteMetricDiagnostics(string Destination, string NextHop, int InterfaceIndex,
+    int RouteMetric, int InterfaceMetric, int TotalMetric);
+
+/// <summary>Sanitized runtime error persisted in the Host state directory. It must never contain credentials or network secrets.</summary>
+public sealed record RuntimeErrorRecord(DateTimeOffset TimestampUtc, string Code, string Message);
+
+/// <summary>Stable diagnostics contract consumed by the Windows/Linux client tools and multi-node acceptance scripts.</summary>
+public sealed record HostDiagnosticsSnapshot(
+    string BuildId,
+    string CoreBase,
+    int Schema,
+    NodeRole Role,
+    DateTimeOffset ObservedUtc,
+    string RuntimeState,
+    int? CorePid,
+    string? PhysicalInterface,
+    int? PhysicalInterfaceIndex,
+    string? PhysicalIpv4,
+    string? PhysicalGateway,
+    IReadOnlyList<string> PhysicalDnsServers,
+    IReadOnlyList<RouteMetricDiagnostics> RouteMetrics,
+    string? OverlayInterface,
+    string? OverlayIp,
+    int PeerCount,
+    string GatewayState,
+    string? SeedPhysicalIp,
+    IReadOnlyList<string> ProtectedEndpoints,
+    IReadOnlyList<RuntimeErrorRecord> RecentErrors,
+    string? CaptureError,
+    string? CoreError);
+
 public sealed class HostException(string code, string message) : Exception($"{code}: {message}")
 {
     public string Code { get; } = code;
