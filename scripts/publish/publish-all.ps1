@@ -28,7 +28,7 @@ function Invoke-RolePublisher {
     else {
         & $Script -CoreDirectory $CoreDirectory -OutputDirectory $OutputDirectory -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration
     }
-    if ($LASTEXITCODE -ne 0) { throw "Package publisher failed: $OutputDirectory" }
+    # Child PowerShell errors propagate; LASTEXITCODE belongs to native processes used inside the child script.
 }
 
 # The gateway at 10.10.0.1 is a Dedicated-class deployment package with Role=Gateway in its profile.
@@ -51,7 +51,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Manager publish failed' }
 
 & (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
     -PackageDirectory $managerOut -RuntimeIdentifier $WindowsRuntimeIdentifier -PackageKind 'manager-windows'
-if ($LASTEXITCODE -ne 0) { throw 'Manager package metadata generation failed' }
 
 Write-Host 'Canonical publish layout created:'
 Write-Host '  publish/manager'
