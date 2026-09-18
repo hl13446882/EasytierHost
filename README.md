@@ -2,9 +2,25 @@
 
 基于 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。当前开发分支已覆盖受限 DHCP、四角色配置、Host 进程守护、Gateway NAT/forwarding/DNS 生命周期、Underlay 防递归、Client Internet 路由事务、Windows SCM/Linux systemd 服务化、SSH 远程部署、管理端 WPF、普通 Windows/Linux 客户端控制入口、结构化诊断以及发布包完整性校验。**Seed + Gateway + 两个 Client 的多节点实机验收仍未完成，因此 Internet Gateway 仍属于预览功能，不能视为生产放行。**具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
 
+完整的编译、发布与部署流程见：[编译、发布与部署说明书](docs/BUILD-RELEASE-DEPLOYMENT.md)。仓库已提供 Windows/Linux 一键 Release 构建脚本，并支持 `rc-*` tag 自动触发 GitHub Release Candidate 编译。
+
 ## 构建与测试
 
 需要 .NET 8+ SDK、Rust stable、Windows C++ 链接工具；Windows 构建 Core 时需要 7-Zip 在 PATH 中。依赖恢复需要联网。
+
+Windows 一键 Release：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build/build-windows-release.ps1
+```
+
+Linux 一键 Release：
+
+```bash
+bash scripts/build/build-linux-release.sh
+```
+
+手工开发测试：
 
 ```powershell
 dotnet build EasyTierHost.sln
@@ -23,7 +39,7 @@ cargo +stable test -p easytier --lib underlay_ --no-default-features --features 
 cargo +stable build -p easytier --no-default-features --features tun --bin easytier-core --bin easytier-cli
 ```
 
-`.github/workflows/host-ci.yml` 同时运行 Windows 与 Ubuntu 原生 job。Windows job 执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Diagnostics/Integration/Deployment 测试、Windows/Linux 发布结构与 manifest smoke，以及 EasyTier DHCP/Underlay 针对性 Rust 测试；Ubuntu job原生编译 Host/Deployment 并执行 Bash、Host/Client/Diagnostics/Integration/Deployment 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 `Packet.dll` 与 `wintun.dll`，Windows 发布脚本会按 `win-x64`/`win-arm64` 自动复制匹配架构的原生运行时并把它们纳入 manifest 校验。
+`.github/workflows/host-ci.yml` 同时运行 Windows 与 Ubuntu 原生 job。Windows job 执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Diagnostics/Integration/Deployment 测试、Windows/Linux 发布结构与 manifest smoke，以及 EasyTier DHCP/Underlay 针对性 Rust 测试；Ubuntu job 原生编译 Host/Deployment 并执行 Bash、Host/Client/Diagnostics/Integration/Deployment 测试。`linux-privileged-network.yml` 另外在隔离 Linux network namespace 内实际验证路由、`ip_forward`、nftables NAT、数据包转发和 gateway journal 恢复。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 `Packet.dll` 与 `wintun.dll`，Windows 发布脚本会按 `win-x64`/`win-arm64` 自动复制匹配架构的原生运行时并把它们纳入 manifest 校验。
 
 ## 地址与角色
 
@@ -113,7 +129,7 @@ scripts/publish/verify-package.ps1 -PackageDirectory publish/client-windows -Exp
 
 校验 manifest 路径、文件数量、长度、SHA-256、必需组件和 Windows TUN 原生运行时，并拒绝把 `.secret` 或 `core.toml` 打进发布包。日常 CI 中的发布 smoke 使用 sentinel Core/CLI 只验证发布管线和完整性算法；正式候选包必须使用真实 Release Core/CLI 构建。
 
-仓库另提供手工触发的 `.github/workflows/release-candidate.yml`：Windows 与 Linux 分别从当前 patched EasyTier 源码运行 DHCP/Underlay 测试、Release 编译 Core/CLI、生成规范角色包、执行 manifest 校验，再上传短期候选 artifact。该工作流生成的是**实机验收候选物**，仍不能替代安装、路由、NAT、DNS 与抓包验收。
+`.github/workflows/release-candidate.yml` 可手工触发，也可通过推送 `rc-*` tag 自动触发。Windows 与 Linux 会分别从当前 patched EasyTier 源码执行测试、Release 编译 Core/CLI、调用仓库一键构建脚本生成规范角色包、执行 manifest 校验，再上传短期候选 artifact。该工作流生成的是**实机验收候选物**，仍不能替代安装、路由、NAT、DNS 与抓包验收。
 
 ## 当前验收边界
 
