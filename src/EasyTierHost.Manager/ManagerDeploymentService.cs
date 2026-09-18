@@ -178,7 +178,7 @@ public sealed class ManagerDeploymentService
 
         public string DiagnosticsCommand(string username) =>
             InstallDirectory.StartsWith("C:/", StringComparison.OrdinalIgnoreCase)
-                ? $"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& '{InstallDirectory}/easytier-host.exe' diagnostics '{ProfilePath}'\""
-                : $"{(username.Equals("root", StringComparison.Ordinal) ? string.Empty : "sudo -n ")}'{InstallDirectory}/easytier-host' diagnostics '{ProfilePath}'";
+                ? $"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& '{InstallDirectory}/easytier-host.exe' diagnostics '{ProfilePath}' '{StateDirectory}'\""
+                : $"{(username.Equals("root", StringComparison.Ordinal) ? string.Empty : "sudo -n ")}'{InstallDirectory}/easytier-host' diagnostics '{ProfilePath}' '{StateDirectory}'";
     }
 }
