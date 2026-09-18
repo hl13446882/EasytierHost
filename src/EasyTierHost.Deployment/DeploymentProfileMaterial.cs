@@ -1,4 +1,3 @@
-using System.Text.Json;
 using EasyTierHost.Abstractions;
 using EasyTierHost.Core;
 
@@ -7,7 +6,7 @@ namespace EasyTierHost.Deployment;
 /// <summary>
 /// Creates a short-lived, ACL-restricted plaintext copy of the network secret for SCP transport.
 /// The remote installer immediately converts it to the target platform's native secret format by
-/// invoking easiertier-host set-secret over SSH. The plaintext is never added to a command line.
+/// invoking easytier-host set-secret over SSH. The plaintext is never added to a command line.
 /// </summary>
 internal sealed class DeploymentProfileMaterial : IAsyncDisposable
 {
@@ -80,4 +79,5 @@ internal sealed class DeploymentProfileMaterial : IAsyncDisposable
 public static class DeploymentProfileRules
 {
     public static string NormalizeSecretRelativePath(string path) => DeploymentValidation.NormalizeSecretRelativePath(path);
+    public static Task<NetworkProfile> ValidateAsync(DeploymentRequest request, CancellationToken ct = default) => DeploymentValidation.ValidateProfileAsync(request, ct);
 }
