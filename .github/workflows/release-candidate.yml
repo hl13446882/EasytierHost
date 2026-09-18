@@ -62,9 +62,10 @@ jobs:
       - name: Prepare Linux build environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler pkg-config build-essential
+          sudo apt-get install -y protobuf-compiler pkg-config build-essential mold
           rustup toolchain install stable --profile minimal
           protoc --version
+          mold --version
           pwsh --version
       - name: Build Linux release candidate
         run: |
