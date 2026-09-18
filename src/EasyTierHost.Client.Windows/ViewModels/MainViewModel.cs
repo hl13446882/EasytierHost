@@ -1,6 +1,10 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using EasyTierHost.Abstractions;
 using EasyTierHost.Client.Windows.Services;
+using EasyTierHost.Core;
 
 namespace EasyTierHost.Client.Windows.ViewModels;
 
@@ -81,8 +85,56 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public Task DiagnosticsAsync(CancellationToken ct = default) => ExecuteAsync(async () =>
     {
         var result = await service.DiagnosticsAsync(ct);
-        Details = result.Success ? result.StdOut.Trim() : $"diagnostics exit {result.ExitCode}";
+        Details = result.Success ? FormatDiagnostics(result.StdOut) : $"diagnostics exit {result.ExitCode}";
     }, clearDetails: false);
+
+    public static string FormatDiagnostics(string json)
+    {
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<HostDiagnosticsSnapshot>(json, ConfigurationStore.Json);
+            if (snapshot is null) return json.Trim();
+
+            var text = new StringBuilder();
+            text.AppendLine($"Build: {snapshot.BuildId} / EasyTier {snapshot.CoreBase}");
+            text.AppendLine($"运行状态: {snapshot.RuntimeState}    Core PID: {snapshot.CorePid?.ToString() ?? "-"}");
+            text.AppendLine($"物理网络: {snapshot.PhysicalInterface ?? "-"}  {snapshot.PhysicalIpv4 ?? "-"}  网关 {snapshot.PhysicalGateway ?? "-"}");
+            text.AppendLine($"虚拟网络: {snapshot.OverlayInterface ?? "-"}  {snapshot.OverlayIp ?? "-"}  Peers {snapshot.PeerCount}");
+            text.AppendLine($"Internet Gateway: {snapshot.GatewayState}");
+            text.AppendLine($"Seed: {snapshot.SeedPhysicalIp ?? "-"}");
+
+            if (snapshot.ProtectedEndpoints.Count > 0)
+                text.AppendLine("物理保护端点: " + string.Join(", ", snapshot.ProtectedEndpoints));
+            if (snapshot.PhysicalDnsServers.Count > 0)
+                text.AppendLine("物理 DNS: " + string.Join(", ", snapshot.PhysicalDnsServers));
+
+            var defaultRoutes = snapshot.RouteMetrics
+                .Where(route => route.Destination is "0.0.0.0/0" or "0.0.0.0/1" or "128.0.0.0/1")
+                .OrderBy(route => route.Destination, StringComparer.Ordinal)
+                .ThenBy(route => route.TotalMetric)
+                .ToArray();
+            if (defaultRoutes.Length > 0)
+            {
+                text.AppendLine("路由:");
+                foreach (var route in defaultRoutes)
+                    text.AppendLine($"  {route.Destination} -> {route.NextHop}  if={route.InterfaceIndex}  metric={route.RouteMetric}+{route.InterfaceMetric}={route.TotalMetric}");
+            }
+
+            if (snapshot.RecentErrors.Count > 0)
+            {
+                text.AppendLine("最近错误:");
+                foreach (var error in snapshot.RecentErrors.TakeLast(5))
+                    text.AppendLine($"  {error.TimestampUtc.LocalDateTime:yyyy-MM-dd HH:mm:ss}  {error.Code}  {error.Message}");
+            }
+            if (snapshot.CaptureError is not null) text.AppendLine("网络采集: " + snapshot.CaptureError);
+            if (snapshot.CoreError is not null) text.AppendLine("Core RPC: " + snapshot.CoreError);
+            return text.ToString().TrimEnd();
+        }
+        catch (JsonException)
+        {
+            return json.Trim();
+        }
+    }
 
     private async Task ExecuteAsync(Func<Task> action, bool clearDetails = true)
     {
@@ -107,7 +159,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         StatusMessage = state.Message;
     }
 
-    private static string SafeMessage(Exception ex) => ex is EasyTierHost.Abstractions.HostException
+    private static string SafeMessage(Exception ex) => ex is HostException
         ? ex.Message
         : $"{ex.GetType().Name}: operation failed";
 
