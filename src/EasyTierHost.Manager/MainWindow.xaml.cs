@@ -126,11 +126,10 @@ public partial class MainWindow : Window
         if (DedicatedPackageDirectory is not null)
         {
             var os = DedicatedOs is null ? ServerOsType.Linux : SelectedOs(DedicatedOs);
-            var role = index == 1 ? "gateway" : "dedicated";
             var suffix = os == ServerOsType.Windows ? "windows" : "linux";
             var current = DedicatedPackageDirectory.Text.Replace('\\', '/');
             if (string.IsNullOrWhiteSpace(current) || current.StartsWith("publish/gateway-", StringComparison.OrdinalIgnoreCase) || current.StartsWith("publish/dedicated-", StringComparison.OrdinalIgnoreCase))
-                DedicatedPackageDirectory.Text = $"publish/{role}-{suffix}";
+                DedicatedPackageDirectory.Text = $"publish/dedicated-{suffix}";
         }
     }
 
