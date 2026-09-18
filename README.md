@@ -1,6 +1,6 @@
 # EasyTierHost
 
-基于所提供 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。已提供受限 DHCP、角色配置、Host 进程守护、网关 NAT/forwarding/DNS 生命周期、Underlay 防递归补丁，以及客户端 Internet 路由的实验性协调流程。**完整自治网关、远程部署、Windows GUI 和多节点实机验收尚未完成**，具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
+基于 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。当前开发分支已覆盖受限 DHCP、四角色配置、Host 进程守护、Gateway NAT/forwarding/DNS 生命周期、Underlay 防递归、Client Internet 路由事务、Windows SCM/Linux systemd 服务化、SSH 远程部署、管理端 WPF，以及普通 Windows/Linux 客户端控制入口。**Seed + Gateway + 两个 Client 的多节点实机验收仍未完成，因此 Internet Gateway 仍属于预览功能，不能视为生产放行。**具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
 
 ## 构建与测试
 
@@ -8,7 +8,13 @@
 
 ```powershell
 dotnet build EasyTierHost.sln
+dotnet build src/EasyTierHost.Manager/EasyTierHost.Manager.csproj
+dotnet build src/EasyTierHost.Client.Windows/EasyTierHost.Client.Windows.csproj
 dotnet run --project tests/EasyTierHost.UnitTests
+dotnet run --project tests/EasyTierHost.ClientTests
+dotnet run --project tests/EasyTierHost.IntegrationTests
+dotnet run --project tests/EasyTierHost.DeploymentTests
+
 cd EasyTier-2.6.4
 $env:PATH = "$PWD/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
 cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
@@ -16,37 +22,88 @@ cargo +stable test -p easytier --lib underlay_ --no-default-features --features 
 cargo +stable build -p easytier --no-default-features --features tun --bin easytier-core --bin easytier-cli
 ```
 
-开发分支包含根目录 `.github/workflows/host-ci.yml`，在 Windows runner 上自动执行 Host solution build 和 UnitTests。`tun` 构建支持此预览版使用的 TCP/UDP Overlay；完整传输集合可用原仓库默认 features 构建。Windows 运行需要仓库 `easytier/third_party/x86_64` 中的 Packet.dll 在 DLL 搜索路径，TUN 需要 wintun.dll；打包脚本会复制已有原生文件，不执行系统驱动安装。
+`.github/workflows/host-ci.yml` 在 Windows runner 上执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Integration/Deployment 测试以及 EasyTier DHCP/Underlay 针对性 Rust 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 Packet.dll 与 wintun.dll；发布包应携带对应原生依赖。
 
-## 使用
+## 地址与角色
 
-将 `config/templates` 下相应角色配置复制到自己的专用配置目录。修改示例 Seed `192.0.2.10` 为实际地址；给所有节点配置相同的 networkName 和 network secret。CorePath/CliPath 推荐填写新编译二进制的绝对路径，不能使用没有 DHCP/Underlay 补丁的官方 Core。
+固定 Overlay 网络为 `10.10.0.0/16`：Gateway/DNS 为 `10.10.0.1`；Dedicated 为 `10.10.0.2–10.10.0.10`；普通 Client 由受限 DHCP 从 `10.10.0.11–10.10.255.254` 分配；Seed 不创建业务 TUN。所有节点使用相同 `networkName` 与 network secret。`SeedPhysicalIp` 始终是 Seed 的公网/物理 IPv4，不能填写 Overlay 地址。
 
-```powershell
-dotnet run --project src/EasyTierHost.Service -- set-secret C:/your-private-config/network.secret
-dotnet run --project src/EasyTierHost.Service -- validate C:/your-private-config/network.json
-dotnet run --project src/EasyTierHost.Service -- run C:/your-private-config/network.json C:/your-private-state
-```
+## Host 命令
 
-`set-secret` 交互输入不回显，文件必须不存在。Windows 使用 DPAPI 与 ACL；Linux 文件必须为 0600。`secretFile` 相对路径以 profile 所在目录为基准。不要把密码放到命令行参数中。
-
-Seed 不创建 TUN；Dedicated 仅允许尾号 2–10；Client 使用 `10.10.0.11–10.10.255.254/16`。Host 启动前检查 Core 的 DHCP 参数能力；当 Client 启用 Internet Gateway 时还会检查 `--underlay-source-ipv4` 能力。首次分配仍沿用 EasyTier 的“至少已连接一个 Peer”条件。实际创建 TUN 和修改路由/DNS 需管理员/root 权限。Ctrl+C 或 Linux SIGTERM 会先撤销 Host 自有网络状态，再停止 Core，并删除临时明文 Core 配置。
+将 `config/templates` 下相应角色配置复制到专用配置目录，并把示例 Seed 地址替换为真实物理地址。Core/CLI 必须使用本仓库带 DHCP/Underlay 补丁的构建，不应换成未打补丁的官方二进制。
 
 ```powershell
-dotnet run --project src/EasyTierHost.Service -- status C:/your-private-config/network.json
-dotnet run --project src/EasyTierHost.Service -- diagnostics C:/your-private-config/network.json
+easytier-host set-secret C:/your-private-config/network.secret
+easytier-host validate C:/your-private-config/network.json
+easytier-host run C:/your-private-config/network.json C:/your-private-state
+
+easytier-host status C:/your-private-config/network.json
+easytier-host ready C:/your-private-config/network.json
+easytier-host diagnostics C:/your-private-config/network.json
 ```
 
-`configure <profile> <output.toml>` 可单独生成私有 Core 配置；该文件含明文 network secret。`dns <gateway-profile>` 是独立 DNS 转发命令，要求本机已具有 `10.10.0.1`，不会配置 NAT 或系统 DNS。
+`set-secret` 从 stdin/交互终端读取，不把 secret 放入命令行参数。Windows 使用 DPAPI machine scope 并依赖私有目录 ACL；Linux secret 必须为 0600。`secretFile` 相对路径以 profile 所在目录为基准。`configure` 生成的 Core TOML 含明文 network secret，只能写入受保护目录并在运行后清理。
 
-Gateway 角色可由 Host 启动，配置 NAT、forwarding 和 UDP/TCP DNS，并在退出或失败时撤销自有状态。Windows 使用 WinNAT，Linux 要求 nftables 且现有防火墙允许转发与 TUN DNS。运行状态见专用状态目录的 `gateway-status.json`。
+## Client Internet Gateway
 
-Client 的 `enableInternetGateway` 默认仍为 `false`。显式设为 `true` 时进入**实验性集成模式**：Host 先捕获物理默认出口，把物理 IPv4 传给 Core 的 `--underlay-source-ipv4`，等待 Client TUN 与 Core 实例一致后保护 Seed/Peer endpoint，执行 `.1` DNS/公网 Probe，再提交两条 IPv4 `/1` 默认路由到 `10.10.0.1`；原物理 `/0` 保留。运行期间会刷新动态 endpoint `/32`，监测物理接口、Overlay 身份、路由所有权与 Internet 健康；异常时按 journal 回滚 DNS/路由并重启 Core。该模式仍需 Windows/Linux 多机抓包、切网、休眠和断电恢复验收，当前不要视为生产放行。详见 [Underlay 审计](docs/UNDERLAY-AUDIT.md)。
+Client 的 `enableInternetGateway=false` 时只加入虚拟局域网；设为 `true` 后，Host 在 Core 启动前捕获物理默认出口，把物理 IPv4 传给 Core 的 `--underlay-source-ipv4`，等待 Client TUN/Core/Peer 一致后保护 Seed/Peer endpoint，再执行 `.1` DNS/HTTPS Probe。Probe 成功后才提交客户端 DNS 与 `0.0.0.0/1`、`128.0.0.0/1 → 10.10.0.1`，原物理 `/0` 始终保留。
+
+运行期间 Host 持续刷新动态 endpoint `/32`，监测物理接口/IP/网关、Overlay 身份、路由所有权与 Internet 健康。异常时按 journal 撤销自有 DNS/路由并重新捕获物理出口，不通过删除系统默认路由强行接管。IPv6 默认路由目前不接管。详见 [Underlay 审计](docs/UNDERLAY-AUDIT.md) 与 [Gateway 运行说明](docs/GATEWAY-OPERATIONS.md)。
+
+## Windows 普通客户端
+
+规范发布包 `publish/client-windows` 中包含 Host/Core/CLI、服务脚本以及：
+
+```text
+client-ui/EasyTierHost.Client.Windows.exe
+```
+
+客户端 UI 以管理员权限运行，只负责配置和控制 `EasyTierHost` Windows Service；**UI 自身不直接启动 Core，也不直接修改默认路由或 DNS**。首次连接填写 Seed Physical IP、Network Name、Network Secret；Secret 写入 ProgramData 私有目录并使用 DPAPI 保护。连接后客户端地址由 DHCP 从 `.11` 起分配。关闭 UI 不等于停止虚拟网；“断开”会正常停止服务，让 Host 完成路由/DNS 回滚。
+
+## Linux 普通客户端
+
+Linux 发布包提供 `scripts/linux/client-control.sh`。安装目录为 `/opt/easytier-host` 时可执行：
+
+```bash
+sudo /opt/easytier-host/scripts/linux/client-control.sh install
+sudo /opt/easytier-host/scripts/linux/client-control.sh status
+sudo /opt/easytier-host/scripts/linux/client-control.sh diagnostics
+sudo /opt/easytier-host/scripts/linux/client-control.sh reconnect
+sudo /opt/easytier-host/scripts/linux/client-control.sh uninstall
+```
+
+首次 `install` 交互输入 Seed Physical IP 和 network secret；secret 经 stdin 交给 Host，不出现在进程参数中。服务由 systemd 管理。远程 Linux 安装器会在上传完成后只对已知 Host/Core/CLI 与自有 `.sh` 恢复 execute bit，以兼容从 Windows 生成/上传发布包的场景。
+
+## 管理端与远程部署
+
+`EasyTierHost.Manager` 用于配置和部署 Seed、Gateway `10.10.0.1` 及 Dedicated `10.10.0.2–10.10.0.10`。远程部署走 OpenSSH，先上传到私有 staging，校验 artifact manifest/SHA-256，再事务式替换程序、profile 与 secret；新节点在规定时间内未达到角色 readiness 时自动尝试恢复旧版本。
+
+Windows 使用 SCM；Linux 使用 systemd。Gateway 与 Dedicated 共用 dedicated 二进制发布布局，通过 profile 的 Role 决定 `.1` Gateway 或 `.2–.10` Dedicated 行为，避免维护两套二进制。
 
 ## 打包
 
-`scripts/publish/Publish.ps1 -CoreDirectory <编译输出目录>` 生成自包含 Host 加 Core/CLI 的 Overlay 预览包、文件校验和及 manifest。Linux 发布使用 `-Runtime linux-x64`，必须提供 Linux Core/CLI；此脚本不替代跨平台编译。Linux systemd unit 模板位于 `scripts/linux`，不是自动安装程序。当前没有 Windows 服务安装程序。
+规范打包入口：
 
-在 Windows 预览包目录中，可用 `./easytier-host.exe` 替代上文的 `dotnet run --project src/EasyTierHost.Service --` 前缀；Linux 使用 `./easytier-host`。先复制并编辑 templates 中的配置，再设置 secret；不要直接连接文档示例 IP。
+```powershell
+scripts/publish/publish-all.ps1 `
+  -WindowsCoreDirectory <windows-core-dir> `
+  -LinuxCoreDirectory <linux-core-dir>
+```
 
-网关前置条件、启动与恢复操作见 [Gateway 运行说明](docs/GATEWAY-OPERATIONS.md)。0.2 打包默认输出到 `publish/preview-0.2-win-x64`，保留旧版发布目录。
+生成：
+
+```text
+publish/manager
+publish/seed-windows
+publish/seed-linux
+publish/dedicated-windows
+publish/dedicated-linux
+publish/client-windows
+publish/client-linux
+```
+
+`publish/client-windows` 额外包含 `client-ui`。每个发布目录使用 SHA-256 manifest 做部署前完整性校验。Windows 服务脚本位于 `scripts/windows`，Linux systemd 安装/卸载脚本位于 `scripts/linux`。
+
+## 当前验收边界
+
+自动测试不能替代真实网络验收。正式放行前仍必须使用独立 Seed + Gateway + Client A + Client B 验证：Client↔Client、Client 经 `.1` 上网、DNS、P2P/Relay 路径、Seed RTT、Gateway/Seed 故障、物理网卡切换、休眠恢复、断电 journal 恢复，以及 Windows/Linux 抓包确认 Underlay 的 Seed/Peer/STUN/DNS/打洞流量始终从物理网发出。
