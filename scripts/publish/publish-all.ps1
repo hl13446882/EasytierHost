@@ -18,10 +18,16 @@ function Invoke-RolePublisher {
         [Parameter(Mandatory = $true)] [string] $Script,
         [Parameter(Mandatory = $true)] [string] $CoreDirectory,
         [Parameter(Mandatory = $true)] [string] $OutputDirectory,
-        [Parameter(Mandatory = $true)] [string] $RuntimeIdentifier
+        [Parameter(Mandatory = $true)] [string] $RuntimeIdentifier,
+        [switch] $IncludeClientUi
     )
 
-    & $Script -CoreDirectory $CoreDirectory -OutputDirectory $OutputDirectory -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration
+    if ($IncludeClientUi) {
+        & $Script -CoreDirectory $CoreDirectory -OutputDirectory $OutputDirectory -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration -IncludeClientUi
+    }
+    else {
+        & $Script -CoreDirectory $CoreDirectory -OutputDirectory $OutputDirectory -RuntimeIdentifier $RuntimeIdentifier -Configuration $Configuration
+    }
     if ($LASTEXITCODE -ne 0) { throw "Package publisher failed: $OutputDirectory" }
 }
 
@@ -29,7 +35,8 @@ function Invoke-RolePublisher {
 # Do not create a second gateway binary layout: role behavior belongs to configuration/runtime state.
 foreach ($role in @('seed', 'dedicated', 'client')) {
     Invoke-RolePublisher -Script $windowsPublisher -CoreDirectory $WindowsCoreDirectory `
-        -OutputDirectory "publish/$role-windows" -RuntimeIdentifier $WindowsRuntimeIdentifier
+        -OutputDirectory "publish/$role-windows" -RuntimeIdentifier $WindowsRuntimeIdentifier `
+        -IncludeClientUi:($role -eq 'client')
     Invoke-RolePublisher -Script $linuxPublisher -CoreDirectory $LinuxCoreDirectory `
         -OutputDirectory "publish/$role-linux" -RuntimeIdentifier $LinuxRuntimeIdentifier
 }
@@ -63,5 +70,5 @@ Write-Host '  publish/seed-windows'
 Write-Host '  publish/seed-linux'
 Write-Host '  publish/dedicated-windows   (includes Gateway role at 10.10.0.1)'
 Write-Host '  publish/dedicated-linux     (includes Gateway role at 10.10.0.1)'
-Write-Host '  publish/client-windows'
+Write-Host '  publish/client-windows      (includes client-ui/EasyTierHost.Client.Windows.exe)'
 Write-Host '  publish/client-linux'
