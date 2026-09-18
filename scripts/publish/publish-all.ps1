@@ -49,20 +49,9 @@ New-Item -ItemType Directory -Force -Path $managerOut | Out-Null
     -c $Configuration -r $WindowsRuntimeIdentifier --self-contained true --nologo -o $managerOut
 if ($LASTEXITCODE -ne 0) { throw 'Manager publish failed' }
 
-$manifestPath = Join-Path $managerOut 'artifact-manifest.json'
-$entries = @(
-    Get-ChildItem -LiteralPath $managerOut -File -Recurse |
-        Where-Object { $_.FullName -ne $manifestPath } |
-        Sort-Object FullName |
-        ForEach-Object {
-            [pscustomobject]@{
-                Path = [IO.Path]::GetRelativePath($managerOut, $_.FullName).Replace('\','/')
-                Length = $_.Length
-                Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
-        }
-)
-@{ Files = $entries } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+& (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
+    -PackageDirectory $managerOut -RuntimeIdentifier $WindowsRuntimeIdentifier -PackageKind 'manager-windows'
+if ($LASTEXITCODE -ne 0) { throw 'Manager package metadata generation failed' }
 
 Write-Host 'Canonical publish layout created:'
 Write-Host '  publish/manager'
