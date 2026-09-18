@@ -132,10 +132,11 @@ static class GatewayTests
     private static async Task DnsListeners()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        using var upstream = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-        var upstreamAddress = (IPEndPoint)upstream.Client.LocalEndPoint!;
-        var tcpUpstream = new TcpListener(upstreamAddress); tcpUpstream.Start();
-        var reserve = new TcpListener(IPAddress.Loopback, 0); reserve.Start(); var listen = (IPEndPoint)reserve.LocalEndpoint; reserve.Stop();
+        var tcpUpstream = new TcpListener(IPAddress.Loopback, 0);
+        tcpUpstream.Start();
+        var upstreamAddress = (IPEndPoint)tcpUpstream.LocalEndpoint;
+        using var upstream = new UdpClient(upstreamAddress);
+        var listen = FindDualProtocolLoopbackPort();
         var udpTask = Task.Run(async () => { var packet = await upstream.ReceiveAsync(timeout.Token); packet.Buffer[2] |= 0x80; await upstream.SendAsync(packet.Buffer, packet.RemoteEndPoint, timeout.Token); });
         var tcpTask = Task.Run(async () => { using var client = await tcpUpstream.AcceptTcpClientAsync(timeout.Token); var q = await DnsMessage.ReadFrameAsync(client.GetStream(), timeout.Token); q[2] |= 0x80; await DnsMessage.WriteFrameAsync(client.GetStream(), q, timeout.Token); });
         await using var runtime = new GatewayDnsRuntime(listen, [upstreamAddress]);
@@ -149,6 +150,23 @@ static class GatewayTests
             using var reboundUdp = new UdpClient(listen); var reboundTcp = new TcpListener(listen); reboundTcp.Start(); reboundTcp.Stop();
         }
         finally { tcpUpstream.Stop(); }
+    }
+    private static IPEndPoint FindDualProtocolLoopbackPort()
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var tcp = new TcpListener(IPAddress.Loopback, 0);
+            tcp.Start();
+            var endpoint = (IPEndPoint)tcp.LocalEndpoint;
+            try
+            {
+                using var udp = new UdpClient(endpoint);
+                return endpoint;
+            }
+            catch (SocketException) { }
+            finally { tcp.Stop(); }
+        }
+        throw new IOException("Unable to reserve a loopback port usable by both TCP and UDP");
     }
     private sealed class FakePlatform : IGatewayPlatform
     {
