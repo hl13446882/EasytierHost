@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../EasyTierHost.Abstractions/EasyTierHost.Abstractions.csproj" />
+    <ProjectReference Include="../EasyTierHost.Core/EasyTierHost.Core.csproj" />
   </ItemGroup>
 </Project>
