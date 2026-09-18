@@ -23,7 +23,7 @@ cargo +stable test -p easytier --lib underlay_ --no-default-features --features 
 cargo +stable build -p easytier --no-default-features --features tun --bin easytier-core --bin easytier-cli
 ```
 
-`.github/workflows/host-ci.yml` 在 Windows runner 上执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Diagnostics/Integration/Deployment 测试、Windows/Linux 发布结构与 manifest smoke，以及 EasyTier DHCP/Underlay 针对性 Rust 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 Packet.dll 与 wintun.dll；发布包应携带对应原生依赖。
+`.github/workflows/host-ci.yml` 同时运行 Windows 与 Ubuntu 原生 job。Windows job 执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Diagnostics/Integration/Deployment 测试、Windows/Linux 发布结构与 manifest smoke，以及 EasyTier DHCP/Underlay 针对性 Rust 测试；Ubuntu job原生编译 Host/Deployment 并执行 Bash、Host/Client/Diagnostics/Integration/Deployment 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 `Packet.dll` 与 `wintun.dll`，Windows 发布脚本会按 `win-x64`/`win-arm64` 自动复制匹配架构的原生运行时并把它们纳入 manifest 校验。
 
 ## 地址与角色
 
@@ -45,7 +45,7 @@ easytier-host diagnostics C:/your-private-config/network.json C:/your-private-st
 
 `set-secret` 从 stdin/交互终端读取，不把 secret 放入命令行参数。Windows 使用 DPAPI machine scope 并依赖私有目录 ACL；Linux secret 必须为 0600。`secretFile` 相对路径以 profile 所在目录为基准。`configure` 生成的 Core TOML 含明文 network secret，只能写入受保护目录并在运行后清理。
 
-`diagnostics` 的 state directory 为可选参数，但实机运维建议传入。输出为固定 JSON 合同，包括 BuildId/CoreBase、角色、Core PID/运行态、物理网卡/IP/网关/DNS、Overlay IP、Peer 数、Gateway 状态、受保护 endpoint、最近脱敏错误，以及 Windows `/0`/`/1` 的 RouteMetric、InterfaceMetric、TotalMetric。诊断不读取 network secret；未知异常只持久化异常类型，不保存原始 Message。
+`diagnostics` 的 state directory 为可选参数，但实机运维建议传入。输出为固定 JSON 合同，包括 BuildId/CoreBase、角色、Core PID/运行态、物理网卡/IP/网关/DNS、Overlay IP、Peer 数、Gateway 状态、受保护 endpoint、最近脱敏错误，以及 Windows `/0`/`/1` 的 RouteMetric、InterfaceMetric、TotalMetric。Gateway/Client 已进入活动状态时，诊断会把启动中的旧 `status.json` 状态规范化为当前活动态；Seed 永远不会把机器上无关的 `10.10/16` 网卡误报成自己的 Overlay。诊断不读取 network secret；未知异常只持久化异常类型，不保存原始 Message。
 
 ## Client Internet Gateway
 
@@ -55,13 +55,13 @@ Client 的 `enableInternetGateway=false` 时只加入虚拟局域网；设为 `t
 
 ## Windows 普通客户端
 
-规范发布包 `publish/client-windows` 中包含 Host/Core/CLI、服务脚本以及：
+规范发布包 `publish/client-windows` 中包含 Host/Core/CLI、`Packet.dll`、`wintun.dll`、服务脚本以及：
 
 ```text
 client-ui/EasyTierHost.Client.Windows.exe
 ```
 
-客户端 UI 以管理员权限运行，只负责配置和控制 `EasyTierHost` Windows Service；**UI 自身不直接启动 Core，也不直接修改默认路由或 DNS**。首次连接填写 Seed Physical IP、Network Name、Network Secret；Secret 写入 ProgramData 私有目录并使用 DPAPI 保护。连接后客户端地址由 DHCP 从 `.11` 起分配。关闭 UI 不等于停止虚拟网；“断开”会正常停止服务，让 Host 完成路由/DNS 回滚。
+客户端 UI 以管理员权限运行，只负责配置和控制 `EasyTierHost` Windows Service；**UI 自身不直接启动 Core，也不直接修改默认路由或 DNS**。首次连接填写 Seed Physical IP、Network Name、Network Secret；Secret 写入 ProgramData 私有目录并使用 DPAPI 保护。连接后客户端地址由 DHCP 从 `.11` 起分配。关闭 UI 不等于停止虚拟网；“断开”会正常停止服务，让 Host 完成路由/DNS 回滚。诊断按钮会把结构化 JSON 转成物理出口、Overlay、Peer、Gateway、路由总跃点和最近错误的可读摘要，原始异常敏感文本不会展示或持久化。
 
 ## Linux 普通客户端
 
@@ -105,13 +105,15 @@ publish/client-windows
 publish/client-linux
 ```
 
-`publish/client-windows` 额外包含 `client-ui`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
+`publish/client-windows` 额外包含 `client-ui`；所有 Windows 节点包同时包含匹配架构的 `Packet.dll` 与 `wintun.dll`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
 
 ```powershell
 scripts/publish/verify-package.ps1 -PackageDirectory publish/client-windows -ExpectedPackageKind client-windows
 ```
 
-校验 manifest 路径、文件数量、长度、SHA-256、必需组件，并拒绝把 `.secret` 或 `core.toml` 打进发布包。CI 中的发布 smoke 使用 sentinel Core/CLI 只验证发布管线和完整性算法；正式候选包仍必须使用真实 Release Core/CLI 构建并实机安装。
+校验 manifest 路径、文件数量、长度、SHA-256、必需组件和 Windows TUN 原生运行时，并拒绝把 `.secret` 或 `core.toml` 打进发布包。日常 CI 中的发布 smoke 使用 sentinel Core/CLI 只验证发布管线和完整性算法；正式候选包必须使用真实 Release Core/CLI 构建。
+
+仓库另提供手工触发的 `.github/workflows/release-candidate.yml`：Windows 与 Linux 分别从当前 patched EasyTier 源码运行 DHCP/Underlay 测试、Release 编译 Core/CLI、生成规范角色包、执行 manifest 校验，再上传短期候选 artifact。该工作流生成的是**实机验收候选物**，仍不能替代安装、路由、NAT、DNS 与抓包验收。
 
 ## 当前验收边界
 
