@@ -51,10 +51,26 @@ jobs:
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run client profile tests
         run: dotnet run --project tests/EasyTierHost.ClientTests
+      - name: Run structured diagnostics tests
+        run: dotnet run --project tests/EasyTierHost.DiagnosticsTests
       - name: Run underlay integration smoke tests
         run: dotnet run --project tests/EasyTierHost.IntegrationTests
       - name: Run deployment safety tests
         run: dotnet run --project tests/EasyTierHost.DeploymentTests
+      - name: Validate Windows and Linux package manifests
+        shell: pwsh
+        run: |
+          $winCore = Join-Path $env:RUNNER_TEMP 'fake-win-core'
+          $linuxCore = Join-Path $env:RUNNER_TEMP 'fake-linux-core'
+          New-Item -ItemType Directory -Force -Path $winCore,$linuxCore | Out-Null
+          Set-Content -LiteralPath (Join-Path $winCore 'easytier-core.exe') -Value 'CI package sentinel core' -NoNewline
+          Set-Content -LiteralPath (Join-Path $winCore 'easytier-cli.exe') -Value 'CI package sentinel cli' -NoNewline
+          Set-Content -LiteralPath (Join-Path $linuxCore 'easytier-core') -Value 'CI package sentinel core' -NoNewline
+          Set-Content -LiteralPath (Join-Path $linuxCore 'easytier-cli') -Value 'CI package sentinel cli' -NoNewline
+          ./scripts/publish/publish-windows.ps1 -CoreDirectory $winCore -OutputDirectory 'publish/ci-client-windows' -IncludeClientUi
+          ./scripts/publish/verify-package.ps1 -PackageDirectory 'publish/ci-client-windows' -ExpectedPackageKind 'client-windows'
+          ./scripts/publish/publish-linux.ps1 -CoreDirectory $linuxCore -OutputDirectory 'publish/ci-client-linux'
+          ./scripts/publish/verify-package.ps1 -PackageDirectory 'publish/ci-client-linux' -ExpectedPackageKind 'node-linux'
       - name: Install Protocol Buffers compiler
         shell: pwsh
         run: |
