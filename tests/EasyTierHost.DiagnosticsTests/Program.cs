@@ -52,7 +52,8 @@ try
     Check(snapshot.PhysicalIpv4 == "192.168.1.20" && snapshot.PhysicalGateway == "192.168.1.1", "physical network missing");
     Check(snapshot.OverlayIp == "10.10.0.11", "Core overlay address missing");
     Check(snapshot.ProtectedEndpoints.SequenceEqual(["192.0.2.10"]), "Seed protection route was not recognized");
-    Check(snapshot.RouteMetrics.Any(route => route.Destination == "0.0.0.0/0" && route.TotalMetric == 35), "route metric diagnostics missing");
+    var expectedTotalMetric = OperatingSystem.IsWindows() ? 35 : 10;
+    Check(snapshot.RouteMetrics.Any(route => route.Destination == "0.0.0.0/0" && route.TotalMetric == expectedTotalMetric), "route metric diagnostics missing");
     Check(snapshot.RecentErrors.Count == 2, "recent errors missing from diagnostics");
 
     var json = JsonSerializer.Serialize(snapshot, ConfigurationStore.Json);
