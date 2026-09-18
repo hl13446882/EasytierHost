@@ -66,6 +66,7 @@
                         <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
                             <Button Content="测试连接" Click="SeedTestConnection_Click" />
                             <Button Content="安装 / 重新部署 Seed" Click="SeedInstall_Click" />
+                            <Button Content="卸载 Seed" Click="SeedUninstall_Click" />
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
@@ -142,6 +143,7 @@
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="测试连接" Click="DedicatedTestConnection_Click" />
                                 <Button Content="安装 / 重新部署" Click="DedicatedInstall_Click" />
+                                <Button Content="卸载" Click="DedicatedUninstall_Click" />
                             </StackPanel>
                         </StackPanel>
                     </Grid>
