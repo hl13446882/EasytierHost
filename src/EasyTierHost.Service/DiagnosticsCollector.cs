@@ -33,6 +33,7 @@ public static class DiagnosticsCollector
 
         var runtime = await ReadRuntimeStatusAsync(stateDirectory, ct);
         var gatewayState = await ReadGatewayStateAsync(profile, stateDirectory, ct);
+        var runtimeState = NormalizeRuntimeState(profile, runtime.State, gatewayState);
         var recentErrors = stateDirectory is null
             ? []
             : await new RuntimeErrorHistory(Path.Combine(stateDirectory, "recent-errors.json")).ReadAsync(ct);
@@ -52,10 +53,16 @@ public static class DiagnosticsCollector
             var peers = await reader.ReadPeersAsync(ct);
             peerCount = peers.Count(peer => peer.PeerId != node.PeerId);
             foreach (var endpoint in peers.SelectMany(peer => peer.Endpoints).Where(IsUnderlayEndpoint)) observedEndpoints.Add(endpoint);
-            if (node.OverlayIp is not null)
+            if (profile.Role != NodeRole.Seed && node.OverlayIp is not null)
             {
                 overlayIp = node.OverlayIp;
                 overlayInterface ??= profile.DeviceName;
+            }
+            else if (profile.Role == NodeRole.Seed)
+            {
+                // Seed is intentionally TUN-less. Never report an unrelated local 10.10/16 adapter as Seed Overlay.
+                overlayIp = null;
+                overlayInterface = null;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -77,7 +84,7 @@ public static class DiagnosticsCollector
             profile.SchemaVersion,
             profile.Role,
             DateTimeOffset.UtcNow,
-            runtime.State,
+            runtimeState,
             runtime.CorePid,
             physical?.PhysicalInterfaceName,
             physical?.PhysicalInterfaceIndex,
@@ -96,13 +103,18 @@ public static class DiagnosticsCollector
             coreError);
     }
 
+    public static string NormalizeRuntimeState(NetworkProfile profile, string runtimeState, string gatewayState)
+    {
+        if (profile.Role == NodeRole.Gateway && gatewayState == "GatewayReady") return "GatewayReady";
+        if (profile.Role == NodeRole.Client && profile.EnableInternetGateway && gatewayState == "GatewayActive") return "ClientGatewayActive";
+        return runtimeState;
+    }
+
     private static (string Name, string Ip)? FindOverlayAdapter(NetworkProfile profile)
     {
-        var candidates = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(nic => nic.OperationalStatus == OperationalStatus.Up)
-            .OrderByDescending(nic => nic.Name.Equals(profile.DeviceName, StringComparison.Ordinal))
-            .ThenBy(nic => nic.Name, StringComparer.Ordinal);
-        foreach (var nic in candidates)
+        if (profile.Role == NodeRole.Seed) return null;
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces()
+                     .Where(nic => nic.OperationalStatus == OperationalStatus.Up && nic.Name.Equals(profile.DeviceName, StringComparison.Ordinal)))
         {
             var address = nic.GetIPProperties().UnicastAddresses
                 .Select(item => item.Address)
