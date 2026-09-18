@@ -29,8 +29,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $out 'scripts/linux') | Out
 Copy-Item -Path (Join-Path $repo 'scripts/linux/*.sh') -Destination (Join-Path $out 'scripts/linux') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'config') -Destination (Join-Path $out 'config') -Recurse -Force
 
+# Script errors propagate. LASTEXITCODE may legitimately contain the result of an optional git probe.
 & (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
     -PackageDirectory $out -RuntimeIdentifier $RuntimeIdentifier -PackageKind 'node-linux'
-if ($LASTEXITCODE -ne 0) { throw 'Package metadata generation failed' }
 
 Write-Host "Linux package created: $out"
