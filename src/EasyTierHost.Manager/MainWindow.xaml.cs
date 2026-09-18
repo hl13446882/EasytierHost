@@ -22,11 +22,17 @@ public partial class MainWindow : Window
     private async void SeedInstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("部署 Seed", ct => _deployment.InstallAsync(BuildSeedOptions(includeSecret: true), ct));
 
+    private async void SeedUninstall_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("卸载 Seed", ct => _deployment.UninstallAsync(BuildSeedOptions(includeSecret: false), ct));
+
     private async void DedicatedTestConnection_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("测试专用服务器 SSH", ct => _deployment.TestConnectionAsync(BuildDedicatedOptions(includeSecret: false), ct));
 
     private async void DedicatedInstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("部署专用服务器", ct => _deployment.InstallAsync(BuildDedicatedOptions(includeSecret: true), ct));
+
+    private async void DedicatedUninstall_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("卸载专用服务器", ct => _deployment.UninstallAsync(BuildDedicatedOptions(includeSecret: false), ct));
 
     private void SeedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSeedPackage();
     private void DedicatedOs_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSpecialDisplay();
