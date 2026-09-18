@@ -30,7 +30,7 @@ jobs:
         run: dotnet build src/EasyTierHost.Manager/EasyTierHost.Manager.csproj --nologo
       - name: Build Windows client UI
         run: dotnet build src/EasyTierHost.Client.Windows/EasyTierHost.Client.Windows.csproj --nologo
-      - name: Parse PowerShell deployment scripts
+      - name: Parse PowerShell scripts
         shell: pwsh
         run: |
           $failed = $false
@@ -44,9 +44,9 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
-      - name: Parse Linux deployment scripts
+      - name: Parse Linux scripts
         shell: bash
-        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh
+        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/validation/collect-linux.sh
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run client profile tests
