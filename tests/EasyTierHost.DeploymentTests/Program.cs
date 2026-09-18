@@ -21,6 +21,18 @@ static void ExpectSyncFailure(Action action, string message)
     throw new Exception(message);
 }
 
+static DeploymentRequest RoleRequest(NodeRole role) => new()
+{
+    OsType = ServerOsType.Windows,
+    Role = role,
+    Remote = new RemoteHostCredential { Host = "192.0.2.10", Username = "administrator" },
+    LocalPackageDirectory = ".",
+    RemoteInstallDirectory = "C:/Program Files/EasyTierHost",
+    LocalProfilePath = "network.json",
+    RemoteProfilePath = "C:/ProgramData/EasyTierHost/network.json",
+    RemoteStateDirectory = "C:/ProgramData/EasyTierHost/state"
+};
+
 var credential = new RemoteHostCredential
 {
     Host = "192.0.2.10",
@@ -99,10 +111,53 @@ finally
     Directory.Delete(profileRoot, true);
 }
 
+var recording = new RecordingInstaller();
+Check(RoleInstallerFactory.Wrap(NodeRole.Seed, recording) is SeedInstaller, "Seed role did not select SeedInstaller");
+Check(RoleInstallerFactory.Wrap(NodeRole.Gateway, recording) is GatewayServerInstaller, "Gateway role did not select GatewayServerInstaller");
+Check(RoleInstallerFactory.Wrap(NodeRole.Dedicated, recording) is DedicatedServerInstaller, "Dedicated role did not select DedicatedServerInstaller");
+Check(ReferenceEquals(RoleInstallerFactory.Wrap(NodeRole.Client, recording), recording), "Client role should keep the platform installer");
+
+await using (var noOpRemote = new NoOpRemoteExecutor())
+{
+    var seed = new SeedInstaller(recording);
+    var rejected = await seed.InstallAsync(RoleRequest(NodeRole.Gateway), noOpRemote, CancellationToken.None);
+    Check(!rejected.Success && rejected.Code == "ETH003", "Seed installer accepted a Gateway request");
+    Check(recording.InstallCalls == 0, "Rejected role reached the platform installer");
+
+    var accepted = await seed.InstallAsync(RoleRequest(NodeRole.Seed), noOpRemote, CancellationToken.None);
+    Check(accepted.Success && recording.InstallCalls == 1, "Valid Seed request did not reach the platform installer");
+}
+
 await using (var remote = new SshRemoteExecutor(credential))
 {
     await ExpectAsyncFailure(() => remote.ExecuteAsync("echo should-not-run", CancellationToken.None), "Password authentication was passed to a child process");
 }
 
-Console.WriteLine("PASS deployment manifest, profile portability and credential safety tests");
+Console.WriteLine("PASS deployment manifest, profile portability, role boundaries and credential safety tests");
 return 0;
+
+sealed class RecordingInstaller : IServiceInstaller
+{
+    public int InstallCalls { get; private set; }
+    public int UninstallCalls { get; private set; }
+
+    public Task<DeploymentResult> InstallAsync(DeploymentRequest request, IRemoteExecutor remote, CancellationToken ct)
+    {
+        InstallCalls++;
+        return Task.FromResult(DeploymentResult.Ok("recorded install"));
+    }
+
+    public Task<DeploymentResult> UninstallAsync(DeploymentRequest request, IRemoteExecutor remote, CancellationToken ct)
+    {
+        UninstallCalls++;
+        return Task.FromResult(DeploymentResult.Ok("recorded uninstall"));
+    }
+}
+
+sealed class NoOpRemoteExecutor : IRemoteExecutor
+{
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public Task<bool> TestConnectionAsync(CancellationToken ct) => Task.FromResult(true);
+    public Task UploadAsync(string localPath, string remotePath, CancellationToken ct) => Task.CompletedTask;
+    public Task<RemoteCommandResult> ExecuteAsync(string command, CancellationToken ct) => Task.FromResult(new RemoteCommandResult(0, string.Empty, string.Empty));
+}
