@@ -19,6 +19,9 @@ public partial class MainWindow : Window
     private async void SeedTestConnection_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("测试 Seed SSH", ct => _deployment.TestConnectionAsync(BuildSeedOptions(includeSecret: false), ct));
 
+    private async void SeedDiagnostics_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("读取 Seed 诊断", ct => _deployment.DiagnosticsAsync(BuildSeedOptions(includeSecret: false), ct));
+
     private async void SeedInstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("部署 Seed", ct => _deployment.InstallAsync(BuildSeedOptions(includeSecret: true), ct));
 
@@ -27,6 +30,9 @@ public partial class MainWindow : Window
 
     private async void DedicatedTestConnection_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("测试专用服务器 SSH", ct => _deployment.TestConnectionAsync(BuildDedicatedOptions(includeSecret: false), ct));
+
+    private async void DedicatedDiagnostics_Click(object sender, RoutedEventArgs e) =>
+        await RunOperationAsync("读取专用服务器诊断", ct => _deployment.DiagnosticsAsync(BuildDedicatedOptions(includeSecret: false), ct));
 
     private async void DedicatedInstall_Click(object sender, RoutedEventArgs e) =>
         await RunOperationAsync("部署专用服务器", ct => _deployment.InstallAsync(BuildDedicatedOptions(includeSecret: true), ct));
