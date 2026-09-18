@@ -76,6 +76,23 @@ public sealed class ManagerDeploymentService
         { return DeploymentResult.Fail("ETH402", "Remote uninstall preparation failed"); }
     }
 
+    public async Task<DeploymentResult> DiagnosticsAsync(ManagerDeploymentOptions options, CancellationToken ct = default)
+    {
+        try
+        {
+            ValidateRemoteOptions(options);
+            var layout = RemoteLayout.For(options.OsType);
+            await using var remote = RemoteExecutorFactory.Create(Credential(options));
+            var result = await remote.ExecuteAsync(layout.DiagnosticsCommand(options.Username), ct);
+            if (!result.Success) return DeploymentResult.Fail("ETH402", "Remote diagnostics command failed");
+            var output = result.StdOut.Trim();
+            return DeploymentResult.Ok(string.IsNullOrWhiteSpace(output) ? "Diagnostics completed with no output" : output);
+        }
+        catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        { return DeploymentResult.Fail("ETH402", "Remote diagnostics preparation failed"); }
+    }
+
     private static DeploymentRequest CreateRequest(ManagerDeploymentOptions options, string localProfilePath)
     {
         var layout = RemoteLayout.For(options.OsType);
@@ -157,5 +174,10 @@ public sealed class ManagerDeploymentService
             ServerOsType.Linux => new("/opt/easytier-host", "/etc/easytier-host/network.json", "/var/lib/easytier-host", "easytier-host"),
             _ => throw new HostException("ETH003", "Unknown server OS")
         };
+
+        public string DiagnosticsCommand(string username) =>
+            InstallDirectory.StartsWith("C:/", StringComparison.OrdinalIgnoreCase)
+                ? $"powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& '{InstallDirectory}/easytier-host.exe' diagnostics '{ProfilePath}'\""
+                : $"{(username.Equals("root", StringComparison.Ordinal) ? string.Empty : "sudo -n ")}'{InstallDirectory}/easytier-host' diagnostics '{ProfilePath}'";
     }
 }
