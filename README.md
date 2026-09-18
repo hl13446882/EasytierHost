@@ -143,7 +143,7 @@ publish/release/client-linux
 publish/release/archives
 ```
 
-`publish/` 只保留上述发布物：二进制、原生运行时、安装/卸载脚本、配置模板与校验元数据，不含 Client WPF、PDB 或开发中间目录。`publish/release/client-windows` 含 Host/Core/CLI、`install-client.ps1` 与 `uninstall-client.ps1`；`publish/release/manager` 为远程部署 UI（含卸载虚拟网）。所有 Windows 节点包同时包含匹配架构的 `Packet.dll` 与 `wintun.dll`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
+每个发布目录根下都有一份阅读用的 DEPLOY.txt 部署教程，步骤按 Seed、网关、普通客户端分开写。`publish/` 只保留上述发布物：二进制、原生运行时、安装/卸载脚本、配置模板、部署教程与校验元数据，不含 Client WPF、PDB 或开发中间目录。`publish/release/client-windows` 含 Host/Core/CLI、`install-client.ps1` 与 `uninstall-client.ps1`；`publish/release/manager` 为远程部署 UI（含卸载虚拟网）。所有 Windows 节点包同时包含匹配架构的 `Packet.dll` 与 `wintun.dll`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
 
 ```powershell
 scripts/publish/verify-package.ps1 -PackageDirectory publish/release/client-windows -ExpectedPackageKind client-windows

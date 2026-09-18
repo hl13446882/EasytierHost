@@ -29,6 +29,9 @@ Copy-Item -LiteralPath $cliExe -Destination (Join-Path $out 'easytier-cli') -For
 New-Item -ItemType Directory -Force -Path (Join-Path $out 'scripts/linux') | Out-Null
 Copy-Item -Path (Join-Path $repo 'scripts/linux/*.sh') -Destination (Join-Path $out 'scripts/linux') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'config') -Destination (Join-Path $out 'config') -Recurse -Force
+$guide = Join-Path $repo 'docs/DEPLOY.txt'
+if (-not (Test-Path -LiteralPath $guide -PathType Leaf)) { throw "Missing $guide" }
+Copy-Item -LiteralPath $guide -Destination (Join-Path $out 'DEPLOY.txt') -Force
 Get-ChildItem -LiteralPath $out -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 # Script errors propagate. LASTEXITCODE may legitimately contain the result of an optional git probe.

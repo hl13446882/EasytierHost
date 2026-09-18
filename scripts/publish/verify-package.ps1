@@ -93,10 +93,10 @@ if ($shaEntries.Count -ne ($actual.Count - 1)) { throw 'sha256.txt contains unex
 
 $windowsRuntime = @('Packet.dll','wintun.dll')
 $required = switch ([string]$manifest.PackageKind) {
-    'manager-windows' { @('EasyTierHost.Manager.exe','EasyTierHost.Manager.cmd','ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
-    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/install-client.ps1','scripts/windows/uninstall-client.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
-    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','version.txt','sha256.txt') }
-    'node-linux' { @('easytier-host','easytier-core','easytier-cli','scripts/linux/install-service.sh','scripts/linux/uninstall-service.sh','scripts/linux/client-control.sh','scripts/linux/ensure-dotnet-runtime.sh','version.txt','sha256.txt') }
+    'manager-windows' { @('EasyTierHost.Manager.exe','EasyTierHost.Manager.cmd','ensure-dotnet-runtime.ps1','DEPLOY.txt','version.txt','sha256.txt') }
+    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/install-client.ps1','scripts/windows/uninstall-client.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','DEPLOY.txt','version.txt','sha256.txt') }
+    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','scripts/windows/ensure-dotnet-runtime.ps1','DEPLOY.txt','version.txt','sha256.txt') }
+    'node-linux' { @('easytier-host','easytier-core','easytier-cli','scripts/linux/install-service.sh','scripts/linux/uninstall-service.sh','scripts/linux/client-control.sh','scripts/linux/ensure-dotnet-runtime.sh','DEPLOY.txt','version.txt','sha256.txt') }
     default { throw "Unknown package kind: $($manifest.PackageKind)" }
 }
 foreach ($relative in $required) {

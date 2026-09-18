@@ -58,6 +58,9 @@ foreach ($script in $scripts) {
     Copy-Item -LiteralPath (Join-Path $repo "scripts/windows/$script") -Destination (Join-Path $scriptDir $script) -Force
 }
 Copy-Item -LiteralPath (Join-Path $repo 'config') -Destination (Join-Path $out 'config') -Recurse -Force
+$guide = Join-Path $repo 'docs/DEPLOY.txt'
+if (-not (Test-Path -LiteralPath $guide -PathType Leaf)) { throw "Missing $guide" }
+Copy-Item -LiteralPath $guide -Destination (Join-Path $out 'DEPLOY.txt') -Force
 Get-ChildItem -LiteralPath $out -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 # PowerShell script failures propagate under ErrorActionPreference=Stop. Do not inspect LASTEXITCODE here:

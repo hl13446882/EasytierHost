@@ -46,6 +46,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Manager publish failed' }
 Get-ChildItem -LiteralPath $managerOut -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 Copy-Item -LiteralPath (Join-Path $repo 'scripts/windows/ensure-dotnet-runtime.ps1') -Destination (Join-Path $managerOut 'ensure-dotnet-runtime.ps1') -Force
+Copy-Item -LiteralPath (Join-Path $repo 'docs/DEPLOY.txt') -Destination (Join-Path $managerOut 'DEPLOY.txt') -Force
 $managerLauncher = @(
     '@echo off'
     'setlocal'

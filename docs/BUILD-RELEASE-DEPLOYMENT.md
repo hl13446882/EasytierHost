@@ -141,7 +141,7 @@ publish/release/
 └─ archives/
 ```
 
-Windows Client 包包含 `scripts/windows/install-client.ps1` 与 `scripts/windows/uninstall-client.ps1`。普通用户不需要图形界面。远程管理使用 `publish/release/manager`。发布目录不含 Client WPF 与 PDB。
+Windows Client 包包含 scripts/windows/install-client.ps1 与 scripts/windows/uninstall-client.ps1。每个角色包根目录都有 DEPLOY.txt 部署教程。普通用户不需要图形界面。远程管理使用 publish/release/manager。发布目录不含 Client WPF 与 PDB。
 
 节点包内不得人工增加 `network.secret`、`core.toml` 或其他未进入 manifest 的文件。部署器会拒绝未登记、多余、缺失、长度不匹配或 SHA-256 不匹配的包。
 

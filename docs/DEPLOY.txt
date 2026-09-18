@@ -1,0 +1,313 @@
+EasyTierHost 0.2 部署教程
+
+本文件随发布包一起提供。请按顺序阅读。虚拟网主功能已冻结，按本教程部署即可。
+
+
+一、先看清发布包
+
+把整个 publish 或 release 文件夹解压到本机后，常见目录如下。
+
+1. manager
+   远程管理端。用来安装、诊断、卸载 Seed、网关、专用服务器和普通客户端。
+
+2. seed-windows 和 seed-linux
+   Seed 节点程序。只负责虚拟网协调，不占用 10.10.0.x 地址，不当网关，不做 NAT。
+
+3. dedicated-windows 和 dedicated-linux
+   专用服务器程序。序号 1 固定为网关 10.10.0.1，同时提供 DNS 和上网出口。
+   序号 2 到 10 是静态专用服务器，地址为 10.10.0.2 到 10.10.0.10，不启用 NAT。
+
+4. client-windows 和 client-linux
+   普通用户程序。DHCP 从 10.10.0.11 起自动分配地址。网关和 DNS 都会指向 10.10.0.1。
+   普通用户不需要图形界面。
+
+5. archives
+   上述目录的压缩包，方便拷贝。
+
+Windows 包需要 Packet.dll 和 wintun.dll，发布包里已经带好。
+程序不内嵌 .NET 运行时。安装时如果机器缺少 .NET 10，官方安装脚本会从微软源自动下载安装。
+
+
+二、网络规划（必须遵守）
+
+虚拟网网段固定为 10.10.0.0/16。
+
+1. Seed：不占用 10.10.0.0 作为本机 TUN 地址。
+2. 网关：永远是 10.10.0.1，同时是 DNS 和上网出口。
+3. 专用服务器：10.10.0.2 到 10.10.0.10。
+4. 普通客户端：从 10.10.0.11 开始由 DHCP 分配。
+5. 所有节点必须使用同一个网络名称和同一份网络密钥。
+6. 非 Seed 节点填写的 Seed 地址必须是 Seed 的真实物理 IP 或公网 IP，不能填 10.10.0.1 这类虚拟网地址。
+7. 网络密钥单独保存在文件里，不要写进命令行，不要放进 Git，也不要放进发布包。
+
+
+三、推荐部署顺序
+
+1. 先部署 Seed，等到 Seed 就绪。
+2. 再部署网关（专用服务器序号 1），等到 10.10.0.1 就绪。
+3. 如有需要，再部署序号 2 到 10 的专用服务器。
+4. 最后部署普通客户端。
+5. 每一层就绪后再做下一层，不要并行乱装。
+
+
+四、开始前的准备
+
+1. 准备一台 Windows 电脑作为管理机，用来运行 manager。
+2. 目标机器已开启 OpenSSH。Linux 一般用 root，Windows 一般用 Administrator。
+3. 远程部署只使用 SSH 密钥或 ssh-agent，不要把 SSH 密码写到命令行。
+4. Windows 目标账号需要管理员权限。Linux 使用 root，或具备免交互 sudo 的账号。
+5. 防火墙放行 SSH 端口，以及 EasyTier 监听端口（默认 11010）。
+6. 网关机器还需要放行虚拟网 10.10.0.0/16 的转发，以及来自该网段的 DNS 53 端口。
+7. 提前把网络密钥写成一行，保存到本机私有文件，例如 C:\secure\network.secret，权限仅本人可读写。
+8. Linux 网关建议预先安装 nftables 和 iptables。系统已有防火墙规则不会被本程序清空。
+
+
+五、用管理端远程部署（推荐）
+
+第 1 步  启动管理端
+
+在管理机进入 publish\release\manager
+双击 EasyTierHost.Manager.cmd
+如果提示缺少 .NET 10 桌面运行时，脚本会先安装，再打开窗口。
+
+第 2 步  部署 Seed
+
+打开第一页：Seed 服务器。
+1. 选择目标系统（Linux 或 Windows）。
+2. 填写远程物理 IP，例如 141.164.40.70。
+3. SSH 端口默认 22。
+4. 用户名：Linux 默认 root，Windows 默认 Administrator。
+5. SSH 私钥路径可留空，将使用本机 ssh-agent。
+6. 网络名称默认 company-overlay，全网必须一致。
+7. 在 Network Secret 框输入网络密钥。
+8. 监听端口默认 11010。
+9. 本地发布包目录会自动指向本机的 seed-linux 或 seed-windows，一般不用改。
+10. 先点 测试连接，成功后再点 安装 / 重新部署 Seed。
+11. 看下方部署日志。成功后再点 诊断，确认 Seed 已就绪。
+
+Seed 不提供网关和 DNS。不要指望在 Seed 上出现 10.10.0.1。
+
+第 3 步  部署网关（专用服务器序号 1）
+
+打开第二页：专用服务器 1-10。
+1. 序号选 1。界面会显示 Overlay IP 为 10.10.0.1，并强制作为网关。
+2. 选择目标系统。
+3. 填写网关机器的物理 IP，例如 10.189.2.86。
+4. 填写 Seed 的物理 IP，必须与上一步 Seed 相同。
+5. 网络名称和密钥必须与 Seed 相同。
+6. 本地发布包目录使用 dedicated-windows 或 dedicated-linux。
+7. 先测试连接，再点安装。
+8. 诊断确认 GatewayReady，NAT 和 DNS 正常后再继续。
+
+第 4 步  部署其他专用服务器（可选）
+
+同一页把序号改为 2 到 10。
+地址会变成 10.10.0.2 到 10.10.0.10。
+这些机器不当网关，不做 NAT。
+发布包仍使用 dedicated 目录，角色由序号决定。
+
+第 5 步  远程安装普通客户端虚拟网
+
+打开第三页：普通客户端。
+1. 选择 Windows 或 Linux。
+2. 填写对方电脑的物理 IP。
+3. 填写 Seed 物理 IP、网络名称、密钥。
+4. 本地发布包目录使用 client-windows 或 client-linux。
+5. 先测试连接，再点 安装虚拟网。
+6. 对方会获得 10.10.0.11 起的地址，网关和 DNS 指向 10.10.0.1。
+
+第 6 步  远程卸载普通客户端虚拟网
+
+同一页点 卸载虚拟网。
+确认后会停止远端服务，并删除远端程序和配置。
+Seed 页和专用服务器页也有对应的卸载按钮，只卸载该角色，不要用它们去卸普通用户电脑。
+
+
+六、Windows 普通电脑本地安装虚拟网
+
+适用于员工电脑。不需要管理端，不需要图形客户端。
+
+第 1 步  用管理员身份打开 PowerShell。
+
+第 2 步  进入 client-windows 包。下面把 D:\EasyTierHost\publish\release\client-windows 换成你的实际路径。
+
+第 3 步  安装。网络密钥从文件读取，不要把密钥写在命令后面。
+
+把 Seed 地址换成你的 Seed 物理 IP，把密钥文件路径换成你的文件。
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\EasyTierHost\publish\release\client-windows\scripts\windows\install-client.ps1 -SeedPhysicalIp 141.164.40.70 -NetworkName company-overlay -SecretFromFile C:\secure\network.secret
+
+也可以先运行脚本，再按提示输入 Seed 地址和密钥。
+
+第 4 步  等待脚本结束。它会：
+1. 检查管理员权限。
+2. 如缺少 .NET 10 则自动安装。
+3. 把程序复制到 C:\Program Files\EasyTierHost
+4. 把配置和密钥写到 C:\ProgramData\EasyTierHost\config
+5. 安装并启动名为 EasyTierHost 的服务。
+6. 等待 DHCP 分配 10.10.0.11 或更大的地址。
+7. 把默认网关和 DNS 指定为 10.10.0.1。
+
+第 5 步  关闭安装窗口不影响虚拟网，服务会继续运行。
+
+第 6 步  本机检查。管理员 PowerShell 先进入安装目录：
+
+cd "C:\Program Files\EasyTierHost"
+Get-Service EasyTierHost
+.\easytier-host.exe ready C:\ProgramData\EasyTierHost\config\network.json
+.\easytier-host.exe diagnostics C:\ProgramData\EasyTierHost\config\network.json C:\ProgramData\EasyTierHost\state
+
+看到服务正在运行，ready 成功，诊断里 Overlay 地址为 10.10.0.11 或更大，即可认为入网成功。
+
+第 7 步  卸载本机虚拟网。管理员 PowerShell 执行：
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\uninstall-client.ps1"
+
+按提示输入 Y 确认。脚本会停止服务，删除配置、密钥、状态和程序目录。
+无人值守可在命令末尾加  -Force
+
+
+七、Linux 普通电脑本地安装虚拟网
+
+第 1 步  把 client-linux 整目录复制到 /opt/easytier-host
+
+sudo mkdir -p /opt/easytier-host
+sudo cp -a 你的路径/publish/release/client-linux/. /opt/easytier-host/
+sudo chmod +x /opt/easytier-host/easytier-host /opt/easytier-host/easytier-core /opt/easytier-host/easytier-cli /opt/easytier-host/scripts/linux/*.sh
+
+第 2 步  安装。把 141.164.40.70 换成 Seed 物理 IP。
+
+在已连接的终端里直接执行，按提示输入 Seed（若未写在命令中）和网络密钥。密钥不要写在命令参数里。
+
+sudo /opt/easytier-host/scripts/linux/client-control.sh install 141.164.40.70 company-overlay
+
+无人值守时，把密钥单独放在仅 root 可读的文件里，用重定向喂给脚本，例如：
+
+sudo /opt/easytier-host/scripts/linux/client-control.sh install 141.164.40.70 company-overlay < /root/network.secret
+
+第 3 步  检查
+
+sudo systemctl status easytier-host --no-pager
+sudo /opt/easytier-host/easytier-host ready /etc/easytier-host/network.json
+sudo /opt/easytier-host/easytier-host diagnostics /etc/easytier-host/network.json /var/lib/easytier-host
+
+第 4 步  常用命令
+
+sudo /opt/easytier-host/scripts/linux/client-control.sh status
+sudo /opt/easytier-host/scripts/linux/client-control.sh diagnostics
+sudo /opt/easytier-host/scripts/linux/client-control.sh reconnect
+
+第 5 步  卸载虚拟网（停止服务并删除配置、状态和 /opt/easytier-host 程序）
+
+sudo /opt/easytier-host/scripts/linux/client-control.sh uninstall
+
+
+八、Windows 上手工安装 Seed 或网关
+
+普通用户不要走这一节。这一节给服务器管理员。
+
+第 1 步  准备三样东西（都不要放进发布包）
+1. 本角色的 network.json，可从包内 config\templates 复制后修改。
+2. 一行网络密钥，保存为 network.secret。
+3. 对应发布目录：Seed 用 seed-windows，网关用 dedicated-windows。
+
+Seed 的 json 里 Role 为 Seed，不要填 Overlay 业务地址。
+网关的 json 里 Role 为 Gateway。
+序号 2 到 10 的 json 里 Role 为 Dedicated，并填写 DedicatedIndex。
+
+所有非 Seed 节点必须填写 Seed 的真实物理 IP。
+
+第 2 步  管理员 PowerShell，把下面路径按实际修改后执行。
+
+先复制程序：
+
+New-Item -ItemType Directory -Force -Path "C:\Program Files\EasyTierHost", C:\ProgramData\EasyTierHost\config, C:\ProgramData\EasyTierHost\state
+Copy-Item -Path D:\EasyTierHost\publish\release\seed-windows\* -Destination "C:\Program Files\EasyTierHost" -Recurse -Force
+Copy-Item -Path .\network.json -Destination C:\ProgramData\EasyTierHost\config\network.json -Force
+Copy-Item -Path .\network.secret -Destination C:\ProgramData\EasyTierHost\config\network.secret -Force
+
+再安装服务：
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\install-service.ps1" -InstallRoot "C:\Program Files\EasyTierHost" -ProfilePath C:\ProgramData\EasyTierHost\config\network.json -StateDirectory C:\ProgramData\EasyTierHost\state
+
+脚本会安装 .NET 10（如缺失）、校验配置、创建 EasyTierHost 服务（延迟自动启动、失败重启）。
+
+第 3 步  检查。先进入安装目录：
+
+cd "C:\Program Files\EasyTierHost"
+Get-Service EasyTierHost
+.\easytier-host.exe ready C:\ProgramData\EasyTierHost\config\network.json
+.\easytier-host.exe diagnostics C:\ProgramData\EasyTierHost\config\network.json C:\ProgramData\EasyTierHost\state
+
+第 4 步  卸载服务（默认不删除配置和密钥）
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\uninstall-service.ps1" -ServiceName EasyTierHost -StateDirectory C:\ProgramData\EasyTierHost\state
+
+
+九、Linux 上手工安装 Seed 或网关
+
+第 1 步  复制程序。Seed 用 seed-linux，网关用 dedicated-linux。
+
+sudo mkdir -p /opt/easytier-host /etc/easytier-host /var/lib/easytier-host
+sudo cp -a 你的路径/publish/release/seed-linux/. /opt/easytier-host/
+sudo cp network.json /etc/easytier-host/network.json
+sudo cp network.secret /etc/easytier-host/network.secret
+sudo chmod 600 /etc/easytier-host/network.secret
+sudo chmod +x /opt/easytier-host/easytier-host /opt/easytier-host/easytier-core /opt/easytier-host/easytier-cli /opt/easytier-host/scripts/linux/*.sh
+
+第 2 步  安装 systemd 服务
+
+sudo /opt/easytier-host/scripts/linux/install-service.sh /opt/easytier-host /etc/easytier-host/network.json /var/lib/easytier-host easytier-host
+
+第 3 步  检查
+
+sudo systemctl status easytier-host --no-pager
+sudo /opt/easytier-host/easytier-host ready /etc/easytier-host/network.json
+sudo /opt/easytier-host/easytier-host diagnostics /etc/easytier-host/network.json /var/lib/easytier-host
+
+第 4 步  卸载服务（默认不删除配置和密钥）
+
+sudo /opt/easytier-host/scripts/linux/uninstall-service.sh easytier-host /var/lib/easytier-host false
+
+
+十、怎样判断已经成功
+
+Seed
+诊断里角色为 Seed，服务在跑，监听端口已打开。本机不应占用 10.10.0.1。
+
+网关
+诊断为 GatewayReady。本机 Overlay 地址为 10.10.0.1。Windows 上能看到自有 NAT 名称以 EasyTierHost_ 开头。DNS 在 10.10.0.1 的 53 端口提供。
+
+普通客户端
+服务在跑。Overlay 地址为 10.10.0.11 或更大。本机网关和 DNS 为 10.10.0.1。能访问网关，也能经网关访问外网（若网关已开通上网）。
+
+建议再做一次连通性确认：从客户端访问 10.10.0.1，以及从客户端访问另一台已入网电脑的 10.10.0.x 地址。
+
+
+十一、升级注意
+
+1. 推荐用管理端远程升级，不要直接覆盖正在运行的安装目录。
+2. 升级前保留 network.json、network.secret、version.txt、artifact-manifest.json。
+3. 远程安装会先备份旧程序和配置，新版本在约 90 秒内达不到该角色就绪状态时，会尝试恢复旧版本。
+4. 网关或客户端正在从故障恢复时，不要删掉恢复日志强行跳过。等 Host 恢复完成、物理网络正常后再升级。
+
+
+十二、不要做的事情
+
+1. 不要把网络密钥、SSH 密码写进命令行或发布目录。
+2. 不要向发布包里手工增加 network.secret 或 core.toml，部署器会拒绝不完整或被改过的包。
+3. 不要把 10.10.0.1 填进 SeedPhysicalIp。
+4. 不要跳过 Seed 直接装客户端。
+5. 不要在没装网关的情况下指望客户端能上网或解析内网 DNS。
+6. 不要用 Docker 包装本程序。
+7. 不要卸载或改动与本系统无关的其他中继服务。
+
+
+十三、出了问题先看哪里
+
+1. 管理端窗口下方的部署日志。
+2. Windows：服务状态，以及 diagnostics 输出。
+3. Linux：journalctl -u easytier-host -n 200 --no-pager
+4. 确认密钥和网络名称全网完全一致。
+5. 确认 Seed 物理 IP 填的是对方面能访问到的真实地址。
+6. 确认本机已有 .NET 10。安装脚本会处理，若公司网络禁止访问微软下载源，需先离线装好运行时。
