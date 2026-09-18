@@ -7,6 +7,9 @@ on:
         description: Optional candidate label
         required: false
         default: manual
+  push:
+    tags:
+      - 'rc-*'
 
 permissions:
   contents: read
@@ -25,35 +28,15 @@ jobs:
           rustup toolchain install stable --profile minimal
           choco install protoc --yes --no-progress
           protoc --version
-      - name: Test and build patched EasyTier Core
-        shell: pwsh
-        working-directory: EasyTier-2.6.4
-        run: |
-          $env:PATH = "$PWD/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
-          cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
-          cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun
-          cargo +stable build -p easytier --release --no-default-features --features tun --bin easytier-core --bin easytier-cli
-      - name: Build canonical Windows candidate packages
+          7z | Select-Object -First 2
+      - name: Build Windows release candidate
         shell: pwsh
         run: |
-          $core = (Resolve-Path 'EasyTier-2.6.4/target/release').Path
-          ./scripts/publish/publish-windows.ps1 -CoreDirectory $core -OutputDirectory 'publish/candidate/seed-windows'
-          ./scripts/publish/publish-windows.ps1 -CoreDirectory $core -OutputDirectory 'publish/candidate/dedicated-windows'
-          ./scripts/publish/publish-windows.ps1 -CoreDirectory $core -OutputDirectory 'publish/candidate/client-windows' -IncludeClientUi
-          foreach ($dir in @('seed-windows','dedicated-windows')) {
-            ./scripts/publish/verify-package.ps1 -PackageDirectory "publish/candidate/$dir" -ExpectedPackageKind 'server-windows'
-          }
-          ./scripts/publish/verify-package.ps1 -PackageDirectory 'publish/candidate/client-windows' -ExpectedPackageKind 'client-windows'
-
-          $manager = 'publish/candidate/manager'
-          dotnet publish src/EasyTierHost.Manager/EasyTierHost.Manager.csproj -c Release -r win-x64 --self-contained true --nologo -o $manager
-          if ($LASTEXITCODE -ne 0) { throw 'Manager publish failed' }
-          ./scripts/publish/write-package-metadata.ps1 -PackageDirectory $manager -RuntimeIdentifier win-x64 -PackageKind manager-windows
-          ./scripts/publish/verify-package.ps1 -PackageDirectory $manager -ExpectedPackageKind manager-windows
+          ./scripts/build/build-windows-release.ps1 -OutputRoot publish/candidate -RuntimeIdentifier win-x64 -Configuration Release
       - name: Upload Windows release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: EasyTierHost-windows-${{ github.sha }}-${{ inputs.label }}
+          name: EasyTierHost-windows-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && inputs.label || github.ref_name }}
           if-no-files-found: error
           retention-days: 14
           path: |
@@ -61,6 +44,7 @@ jobs:
             publish/candidate/seed-windows/**
             publish/candidate/dedicated-windows/**
             publish/candidate/client-windows/**
+            publish/candidate/archives/*.zip
 
   linux-candidate:
     runs-on: ubuntu-latest
@@ -72,30 +56,21 @@ jobs:
       - name: Prepare Linux build environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler pkg-config
+          sudo apt-get install -y protobuf-compiler pkg-config build-essential
           rustup toolchain install stable --profile minimal
           protoc --version
-      - name: Test and build patched EasyTier Core
-        working-directory: EasyTier-2.6.4
+          pwsh --version
+      - name: Build Linux release candidate
         run: |
-          cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
-          cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun
-          cargo +stable build -p easytier --release --no-default-features --features tun --bin easytier-core --bin easytier-cli
-      - name: Build canonical Linux candidate packages
-        shell: pwsh
-        run: |
-          $core = (Resolve-Path 'EasyTier-2.6.4/target/release').Path
-          foreach ($role in @('seed','dedicated','client')) {
-            ./scripts/publish/publish-linux.ps1 -CoreDirectory $core -OutputDirectory "publish/candidate/$role-linux"
-            ./scripts/publish/verify-package.ps1 -PackageDirectory "publish/candidate/$role-linux" -ExpectedPackageKind 'node-linux'
-          }
+          bash scripts/build/build-linux-release.sh --output-root publish/candidate --runtime linux-x64 --configuration Release
       - name: Upload Linux release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: EasyTierHost-linux-${{ github.sha }}-${{ inputs.label }}
+          name: EasyTierHost-linux-${{ github.sha }}-${{ github.event_name == 'workflow_dispatch' && inputs.label || github.ref_name }}
           if-no-files-found: error
           retention-days: 14
           path: |
             publish/candidate/seed-linux/**
             publish/candidate/dedicated-linux/**
             publish/candidate/client-linux/**
+            publish/candidate/archives/*.tar.gz
