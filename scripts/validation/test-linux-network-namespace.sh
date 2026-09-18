@@ -6,7 +6,7 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
-for command in ip nft sysctl ping dotnet; do
+for command in ip nft iptables sysctl ping dotnet; do
   command -v "$command" >/dev/null 2>&1 || { echo "missing required command: $command" >&2; exit 2; }
 done
 
@@ -26,12 +26,14 @@ WAN_HOST="ethgw-host"
 WAN_GW="ethwan"
 OVERLAY_GW="easytierhost"
 OVERLAY_CLIENT="ethclient"
+FAKE_BIN=""
 
 cleanup() {
   ip netns del "$CLIENT_NS" >/dev/null 2>&1 || true
   ip netns del "$GW_NS" >/dev/null 2>&1 || true
   ip link del "$WAN_HOST" >/dev/null 2>&1 || true
   ip link del "$OVERLAY_GW" >/dev/null 2>&1 || true
+  [[ -z "$FAKE_BIN" ]] || rm -rf "$FAKE_BIN"
 }
 cleanup
 trap cleanup EXIT
@@ -58,7 +60,19 @@ ip -n "$CLIENT_NS" addr add 10.10.0.11/16 dev "$OVERLAY_CLIENT"
 ip -n "$CLIENT_NS" link set "$OVERLAY_CLIENT" up
 ip -n "$CLIENT_NS" route add default via 10.10.0.1 dev "$OVERLAY_CLIENT"
 
-# The .NET test runs inside the gateway namespace. All sysctl/nft/route writes are therefore
-# isolated from the GitHub runner's real network namespace. It also launches a ping from the
-# client namespace to prove the NAT rule is needed for the return path.
-ip netns exec "$GW_NS" dotnet "$dll" "$WAN_GW" "$OVERLAY_GW" "$CLIENT_NS" 192.0.2.1
+# The .NET test runs inside the gateway namespace. All sysctl/NAT/route writes are isolated
+# from the runner's real network namespace. First verify the preferred nftables backend.
+echo '== privileged gateway test: nftables =='
+ip netns exec "$GW_NS" env "PATH=$PATH" dotnet "$dll" "$WAN_GW" "$OVERLAY_GW" "$CLIENT_NS" 192.0.2.1
+
+# Run the same lifecycle again while deliberately making nft unavailable. LinuxNatManager must
+# fall back to one exact owned iptables MASQUERADE rule and remove it during normal/crash recovery.
+FAKE_BIN="$(mktemp -d)"
+cat >"$FAKE_BIN/nft" <<'EOF'
+#!/usr/bin/env sh
+exit 127
+EOF
+chmod +x "$FAKE_BIN/nft"
+
+echo '== privileged gateway test: iptables fallback =='
+ip netns exec "$GW_NS" env "PATH=$FAKE_BIN:$PATH" dotnet "$dll" "$WAN_GW" "$OVERLAY_GW" "$CLIENT_NS" 192.0.2.1
