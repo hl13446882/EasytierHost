@@ -16,23 +16,36 @@ public sealed class DeploymentService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         { return DeploymentResult.Fail("ETH003", "Deployment profile validation failed"); }
 
+        IServiceInstaller installer;
+        try { installer = CreateInstaller(request); }
+        catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+
         await using var remote = RemoteExecutorFactory.Create(request.Remote);
         if (!await remote.TestConnectionAsync(ct)) return DeploymentResult.Fail("ETH001", "SSH connection failed");
-        IServiceInstaller installer = request.OsType == ServerOsType.Windows
-            ? new WindowsRemoteInstaller()
-            : new LinuxRemoteInstaller();
         return await installer.InstallAsync(request, remote, ct);
     }
 
     public async Task<DeploymentResult> UninstallAsync(DeploymentRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        IServiceInstaller installer;
+        try { installer = CreateInstaller(request); }
+        catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+
         await using var remote = RemoteExecutorFactory.Create(request.Remote);
         if (!await remote.TestConnectionAsync(ct)) return DeploymentResult.Fail("ETH001", "SSH connection failed");
-        IServiceInstaller installer = request.OsType == ServerOsType.Windows
-            ? new WindowsRemoteInstaller()
-            : new LinuxRemoteInstaller();
         return await installer.UninstallAsync(request, remote, ct);
+    }
+
+    private static IServiceInstaller CreateInstaller(DeploymentRequest request)
+    {
+        IServiceInstaller platformInstaller = request.OsType switch
+        {
+            ServerOsType.Windows => new WindowsRemoteInstaller(),
+            ServerOsType.Linux => new LinuxRemoteInstaller(),
+            _ => throw new HostException("ETH003", "Unknown deployment OS")
+        };
+        return RoleInstallerFactory.Wrap(request.Role, platformInstaller);
     }
 
     private static async Task<DeploymentResult?> ValidatePackageIntegrityAsync(string packageRoot, CancellationToken ct)
