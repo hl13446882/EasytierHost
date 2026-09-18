@@ -83,3 +83,27 @@ jobs:
           $env:PATH = "$PWD/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
           cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun
           cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun
+
+  linux-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build Host solution on Linux
+        run: dotnet build EasyTierHost.sln --nologo
+      - name: Build deployment project on Linux
+        run: dotnet build src/EasyTierHost.Deployment/EasyTierHost.Deployment.csproj --nologo
+      - name: Parse Linux scripts on Linux
+        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh scripts/validation/collect-linux.sh
+      - name: Run Host unit tests on Linux
+        run: dotnet run --project tests/EasyTierHost.UnitTests
+      - name: Run client profile tests on Linux
+        run: dotnet run --project tests/EasyTierHost.ClientTests
+      - name: Run structured diagnostics tests on Linux
+        run: dotnet run --project tests/EasyTierHost.DiagnosticsTests
+      - name: Run underlay integration smoke tests on Linux
+        run: dotnet run --project tests/EasyTierHost.IntegrationTests
+      - name: Run deployment safety tests on Linux
+        run: dotnet run --project tests/EasyTierHost.DeploymentTests
