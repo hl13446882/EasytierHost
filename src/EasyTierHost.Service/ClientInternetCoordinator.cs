@@ -12,7 +12,18 @@ public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteCont
 {
     private string StatusPath => Path.Combine(stateDirectory, "client-gateway-status.json");
 
-    public Task RecoverAsync(CancellationToken ct) => controller.RecoverAsync(ct);
+    public async Task RecoverAsync(CancellationToken ct)
+    {
+        await controller.RecoverAsync(ct);
+        // Clear a stale GatewayActive marker before a new Core/TUN instance starts. The Windows
+        // client UI uses this file as an observer only and must never mistake a previous run for
+        // the current route transaction.
+        await ConfigurationStore.SaveAtomicAsync(StatusPath, new
+        {
+            State = controller.State.ToString(),
+            UpdatedUtc = DateTimeOffset.UtcNow
+        }, ct);
+    }
 
     public static ClientOverlayAdapter? FindAdapter(NetworkProfile profile)
     {
@@ -44,6 +55,14 @@ public sealed class ClientInternetCoordinator(IRouteApi routes, GatewayRouteCont
     {
         if (profile.Role != NodeRole.Client || !profile.EnableInternetGateway) throw new HostException("ETH301", "Internet coordinator requires an enabled Client profile");
         if (process.UnderlaySourceIpv4 != launchPhysical.PhysicalIpv4) throw new HostException("ETH301", "Core underlay binding does not match the captured physical IPv4");
+
+        await ConfigurationStore.SaveAtomicAsync(StatusPath, new
+        {
+            State = "Starting",
+            Physical = launchPhysical.PhysicalInterfaceName,
+            PhysicalIpv4 = launchPhysical.PhysicalIpv4,
+            UpdatedUtc = DateTimeOffset.UtcNow
+        }, ct);
 
         var endpointProtector = new UnderlayRouteProtector { GracePeriod = TimeSpan.FromSeconds(120) };
         ClientOverlayAdapter? overlay = null;
