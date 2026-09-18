@@ -136,11 +136,11 @@
                         <TextBox x:Name="DedicatedListenerPort" Grid.Row="10" Grid.Column="1" Text="11010" />
 
                         <TextBlock Grid.Row="11" Grid.Column="0" Text="本地发布包目录" VerticalAlignment="Center" />
-                        <TextBox x:Name="DedicatedPackageDirectory" Grid.Row="11" Grid.Column="1" Text="publish/gateway-linux" />
+                        <TextBox x:Name="DedicatedPackageDirectory" Grid.Row="11" Grid.Column="1" Text="publish/dedicated-linux" />
 
                         <StackPanel Grid.Row="12" Grid.ColumnSpan="2">
                             <TextBlock Foreground="DimGray" TextWrapping="Wrap"
-                                       Text="序号 1 固定为 10.10.0.1，并强制作为 Gateway + DNS + Internet 出口；序号 2-10 仅作为静态 Overlay 专用服务器，不启用 NAT、DNS 或 Exit Node。" />
+                                       Text="序号 1 固定为 10.10.0.1，并强制作为 Gateway + DNS + Internet 出口；序号 2-10 仅作为静态 Overlay 专用服务器，不启用 NAT、DNS 或 Exit Node。Gateway 与 2-10 专用服务器共用 dedicated 发布包，由配置角色决定运行行为。" />
                             <StackPanel Orientation="Horizontal">
                                 <Button Content="测试连接" Click="DedicatedTestConnection_Click" />
                                 <Button Content="诊断" Click="DedicatedDiagnostics_Click" />
