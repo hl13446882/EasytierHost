@@ -47,6 +47,7 @@ need dotnet "Install .NET 8 SDK or newer."
 need cargo "Install Rust stable with rustup."
 need rustup "Install Rust with rustup."
 need protoc "Install protobuf-compiler."
+need mold "EasyTier's Linux Cargo configuration uses -fuse-ld=mold; install the mold linker."
 need pwsh "Install PowerShell 7; publishing uses the shared PowerShell packaging scripts."
 need tar "Install tar."
 
