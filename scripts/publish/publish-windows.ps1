@@ -37,21 +37,10 @@ if ($IncludeClientUi) {
     if ($LASTEXITCODE -ne 0) { throw 'Windows client UI publish failed' }
 }
 
-# Generate the manifest last so optional UI files are covered by the same deployment integrity check.
-$manifestPath = Join-Path $out 'artifact-manifest.json'
-$entries = @(
-    Get-ChildItem -LiteralPath $out -File -Recurse |
-        Where-Object { $_.FullName -ne $manifestPath } |
-        Sort-Object FullName |
-        ForEach-Object {
-            [pscustomobject]@{
-                Path = [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\','/')
-                Length = $_.Length
-                Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
-        }
-)
-@{ Files = $entries } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+$kind = if ($IncludeClientUi) { 'client-windows' } else { 'server-windows' }
+& (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
+    -PackageDirectory $out -RuntimeIdentifier $RuntimeIdentifier -PackageKind $kind
+if ($LASTEXITCODE -ne 0) { throw 'Package metadata generation failed' }
+
 Write-Host "Windows package created: $out"
-Write-Host "Files: $($entries.Count)"
 if ($IncludeClientUi) { Write-Host "Client UI: client-ui/EasyTierHost.Client.Windows.exe" }
