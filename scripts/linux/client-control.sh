@@ -121,7 +121,7 @@ status_client() {
 diagnostics_client() {
   require_host
   [[ -f "$profile_path" ]] || { echo "profile not configured: $profile_path" >&2; exit 2; }
-  "$host" diagnostics "$profile_path"
+  "$host" diagnostics "$profile_path" "$state_dir"
 }
 
 reconnect_client() {
