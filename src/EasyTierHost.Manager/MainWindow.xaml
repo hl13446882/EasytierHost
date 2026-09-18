@@ -1,0 +1,156 @@
+<Window x:Class="EasyTierHost.Manager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EasyTierHost Manager" Height="820" Width="900" MinHeight="700" MinWidth="760">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="180" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="EasyTierHost 虚拟局域网管理" />
+            <TextBlock Margin="0,4,0,0" Foreground="DimGray"
+                       Text="Overlay: 10.10.0.0/16；Gateway/DNS: 10.10.0.1；专用服务器: 10.10.0.2-10；普通客户端 DHCP: 10.10.0.11-10.10.255.254" />
+        </StackPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem Header="Seed 服务器">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="服务器系统" VerticalAlignment="Center" />
+                        <ComboBox x:Name="SeedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0">
+                            <ComboBoxItem Content="Linux" Tag="Linux" />
+                            <ComboBoxItem Content="Windows" Tag="Windows" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="远程物理 IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedRemoteIp" Grid.Row="1" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="SSH 端口" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedSshPort" Grid.Row="2" Grid.Column="1" Text="22" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="SSH 用户名" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedUsername" Grid.Row="3" Grid.Column="1" Text="root" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="SSH 私钥路径（可空，使用 Agent）" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedPrivateKey" Grid.Row="4" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Network Name" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedNetworkName" Grid.Row="5" Grid.Column="1" Text="company-overlay" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Network Secret" VerticalAlignment="Center" />
+                        <PasswordBox x:Name="SeedNetworkSecret" Grid.Row="6" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Listener Port" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedListenerPort" Grid.Row="7" Grid.Column="1" Text="11010" />
+
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="本地发布包目录" VerticalAlignment="Center" />
+                        <TextBox x:Name="SeedPackageDirectory" Grid.Row="8" Grid.Column="1" Text="publish/seed-linux" />
+
+                        <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Foreground="DimGray" TextWrapping="Wrap"
+                                   Text="Seed 只负责 EasyTier 虚拟网协调，不占用 10.10.0.0 作为 TUN 地址，不提供网关、DNS 或 NAT。当前远程执行使用 OpenSSH Key/ssh-agent，不把 SSH 密码放入命令行。" />
+
+                        <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal">
+                            <Button Content="测试连接" Click="SeedTestConnection_Click" />
+                            <Button Content="安装 / 重新部署 Seed" Click="SeedInstall_Click" />
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="专用服务器 1-10">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="服务器系统" VerticalAlignment="Center" />
+                        <ComboBox x:Name="DedicatedOs" Grid.Row="0" Grid.Column="1" SelectedIndex="0">
+                            <ComboBoxItem Content="Linux" Tag="Linux" />
+                            <ComboBoxItem Content="Windows" Tag="Windows" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="远程物理 IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedRemoteIp" Grid.Row="1" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="SSH 端口" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedSshPort" Grid.Row="2" Grid.Column="1" Text="22" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="SSH 用户名" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedUsername" Grid.Row="3" Grid.Column="1" Text="root" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="SSH 私钥路径（可空，使用 Agent）" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedPrivateKey" Grid.Row="4" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Seed 物理 IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedSeedPhysicalIp" Grid.Row="5" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="专用序号 1-10" VerticalAlignment="Center" />
+                        <ComboBox x:Name="DedicatedIndex" Grid.Row="6" Grid.Column="1" SelectedIndex="0" SelectionChanged="DedicatedIndex_SelectionChanged">
+                            <ComboBoxItem Content="1 - Gateway + DNS + Internet" Tag="1" />
+                            <ComboBoxItem Content="2 - Dedicated" Tag="2" />
+                            <ComboBoxItem Content="3 - Dedicated" Tag="3" />
+                            <ComboBoxItem Content="4 - Dedicated" Tag="4" />
+                            <ComboBoxItem Content="5 - Dedicated" Tag="5" />
+                            <ComboBoxItem Content="6 - Dedicated" Tag="6" />
+                            <ComboBoxItem Content="7 - Dedicated" Tag="7" />
+                            <ComboBoxItem Content="8 - Dedicated" Tag="8" />
+                            <ComboBoxItem Content="9 - Dedicated" Tag="9" />
+                            <ComboBoxItem Content="10 - Dedicated" Tag="10" />
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="固定 Overlay IP" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedOverlayIp" Grid.Row="7" Grid.Column="1" Text="10.10.0.1" IsReadOnly="True" />
+
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Network Name" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedNetworkName" Grid.Row="8" Grid.Column="1" Text="company-overlay" />
+
+                        <TextBlock Grid.Row="9" Grid.Column="0" Text="Network Secret" VerticalAlignment="Center" />
+                        <PasswordBox x:Name="DedicatedNetworkSecret" Grid.Row="9" Grid.Column="1" />
+
+                        <TextBlock Grid.Row="10" Grid.Column="0" Text="Listener Port" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedListenerPort" Grid.Row="10" Grid.Column="1" Text="11010" />
+
+                        <TextBlock Grid.Row="11" Grid.Column="0" Text="本地发布包目录" VerticalAlignment="Center" />
+                        <TextBox x:Name="DedicatedPackageDirectory" Grid.Row="11" Grid.Column="1" Text="publish/dedicated-linux" />
+
+                        <StackPanel Grid.Row="12" Grid.ColumnSpan="2">
+                            <TextBlock Foreground="DimGray" TextWrapping="Wrap"
+                                       Text="序号 1 固定为 10.10.0.1，并强制作为 Gateway + DNS + Internet 出口；序号 2-10 仅作为静态 Overlay 专用服务器，不启用 NAT、DNS 或 Exit Node。" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="测试连接" Click="DedicatedTestConnection_Click" />
+                                <Button Content="安装 / 重新部署" Click="DedicatedInstall_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <GroupBox Grid.Row="2" Header="部署日志" Margin="0,12,0,0">
+            <TextBox x:Name="DeploymentLog" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AcceptsReturn="True" />
+        </GroupBox>
+    </Grid>
+</Window>
