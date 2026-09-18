@@ -46,7 +46,7 @@ jobs:
           if ($failed) { exit 1 }
       - name: Parse Linux deployment scripts
         shell: bash
-        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh
+        run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh scripts/linux/client-control.sh
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
       - name: Run client profile tests
