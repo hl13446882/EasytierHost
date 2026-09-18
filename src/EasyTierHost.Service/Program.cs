@@ -22,7 +22,7 @@ public static class Program
         {
             if (args.Length == 0 || args[0] == "help")
             {
-                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  service <network.json> <state-directory>  (Windows SCM only)\n  status <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
+                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  service <network.json> <state-directory>  (Windows SCM only)\n  status <network.json>\n  ready <network.json>\n  diagnostics <network.json>\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
                 return 0;
             }
             if (args[0] == "set-secret" && args.Length == 2)
@@ -45,6 +45,7 @@ public static class Program
                     await RunAsync(p, Path.GetFullPath(args[2]), stop.Token); return 0;
                 case "status":
                     Console.WriteLine(await new CommandRunner().CheckedAsync(p.CliPath, ["-p", $"127.0.0.1:{p.RpcPort}", "-o", "json", "peer"], stop.Token)); return 0;
+                case "ready": return await ReadyAsync(p, stop.Token);
                 case "diagnostics": await DiagnosticsAsync(p, stop.Token); return 0;
                 case "dns":
                     if (p.Role != NodeRole.Gateway) throw new HostException("ETH003", "DNS forwarder requires Gateway role");
@@ -58,6 +59,41 @@ public static class Program
             // Unexpected errors may include credentials/remote output: retain only their type.
             Console.Error.WriteLine(ex is HostException ? ex.Message : $"Failure: {ex.GetType().Name}"); return 1;
         }
+    }
+
+    private static async Task<int> ReadyAsync(NetworkProfile profile, CancellationToken ct)
+    {
+        var addresses = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == OperationalStatus.Up)
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+            .Select(a => a.Address)
+            .ToArray();
+        var addressState = NodeReadiness.Evaluate(profile, addresses);
+        if (!addressState.Ready)
+        {
+            Console.Error.WriteLine($"Not ready: {addressState.Reason}");
+            return 2;
+        }
+
+        try
+        {
+            _ = await new CommandRunner().CheckedAsync(profile.CliPath, ["-p", $"127.0.0.1:{profile.RpcPort}", "-o", "json", "peer"], ct);
+        }
+        catch
+        {
+            Console.Error.WriteLine("Not ready: EasyTier Core RPC is unavailable");
+            return 2;
+        }
+
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            Ready = true,
+            Role = profile.Role.ToString(),
+            addressState.OverlayIp,
+            addressState.Reason,
+            CoreRpc = "Ready"
+        }, ConfigurationStore.Json));
+        return 0;
     }
 
     private static async Task<int> RunServiceAsync(string profilePath, string stateDirectory, CancellationToken ct)
