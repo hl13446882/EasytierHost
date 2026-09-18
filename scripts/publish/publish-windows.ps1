@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)] [string] $CoreDirectory,
     [string] $OutputDirectory = "publish/client-windows",
     [ValidateSet('win-x64','win-arm64')] [string] $RuntimeIdentifier = 'win-x64',
-    [string] $Configuration = 'Release'
+    [string] $Configuration = 'Release',
+    [switch] $IncludeClientUi
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +30,14 @@ New-Item -ItemType Directory -Force -Path (Join-Path $out 'scripts/windows') | O
 Copy-Item -Path (Join-Path $repo 'scripts/windows/*.ps1') -Destination (Join-Path $out 'scripts/windows') -Force
 Copy-Item -LiteralPath (Join-Path $repo 'config') -Destination (Join-Path $out 'config') -Recurse -Force
 
+if ($IncludeClientUi) {
+    $clientUi = Join-Path $out 'client-ui'
+    & dotnet publish (Join-Path $repo 'src/EasyTierHost.Client.Windows/EasyTierHost.Client.Windows.csproj') `
+        -c $Configuration -r $RuntimeIdentifier --self-contained true --nologo -o $clientUi
+    if ($LASTEXITCODE -ne 0) { throw 'Windows client UI publish failed' }
+}
+
+# Generate the manifest last so optional UI files are covered by the same deployment integrity check.
 $manifestPath = Join-Path $out 'artifact-manifest.json'
 $entries = @(
     Get-ChildItem -LiteralPath $out -File -Recurse |
@@ -45,3 +54,4 @@ $entries = @(
 @{ Files = $entries } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
 Write-Host "Windows package created: $out"
 Write-Host "Files: $($entries.Count)"
+if ($IncludeClientUi) { Write-Host "Client UI: client-ui/EasyTierHost.Client.Windows.exe" }
