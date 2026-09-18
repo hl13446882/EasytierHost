@@ -49,6 +49,8 @@ jobs:
         run: bash -n scripts/linux/install-service.sh scripts/linux/uninstall-service.sh
       - name: Run Host unit tests
         run: dotnet run --project tests/EasyTierHost.UnitTests
+      - name: Run client profile tests
+        run: dotnet run --project tests/EasyTierHost.ClientTests
       - name: Run underlay integration smoke tests
         run: dotnet run --project tests/EasyTierHost.IntegrationTests
       - name: Run deployment safety tests
