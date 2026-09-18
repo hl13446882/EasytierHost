@@ -79,10 +79,11 @@ foreach ($file in $actual | Where-Object Path -ne 'sha256.txt') {
 }
 if ($shaEntries.Count -ne ($actual.Count - 1)) { throw 'sha256.txt contains unexpected entries' }
 
+$windowsRuntime = @('Packet.dll','wintun.dll')
 $required = switch ([string]$manifest.PackageKind) {
     'manager-windows' { @('EasyTierHost.Manager.exe','version.txt','sha256.txt') }
-    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe','scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','client-ui/EasyTierHost.Client.Windows.exe','version.txt','sha256.txt') }
-    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe','scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','version.txt','sha256.txt') }
+    'client-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','client-ui/EasyTierHost.Client.Windows.exe','version.txt','sha256.txt') }
+    'server-windows' { @('easytier-host.exe','easytier-core.exe','easytier-cli.exe') + $windowsRuntime + @('scripts/windows/install-service.ps1','scripts/windows/uninstall-service.ps1','version.txt','sha256.txt') }
     'node-linux' { @('easytier-host','easytier-core','easytier-cli','scripts/linux/install-service.sh','scripts/linux/uninstall-service.sh','version.txt','sha256.txt') }
     default { throw "Unknown package kind: $($manifest.PackageKind)" }
 }
