@@ -17,17 +17,26 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
             var stagedSecret = $"{stage}/network-secret.plain";
             var remoteSecret = DeploymentValidation.ResolveRemoteSecretPath(request, material.SecretRelativePath);
 
-            var createScript = $"$ErrorActionPreference='Stop'; $stage={Ps(stage)}; New-Item -ItemType Directory -Force -Path $stage | Out-Null; $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & \"$env:SystemRoot\\System32\\icacls.exe\" $stage '/inheritance:r' '/grant:r' (\"*${{sid}}:(OI)(CI)F\") '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null; if ($LASTEXITCODE -ne 0) {{ throw 'Unable to secure deployment staging directory' }}";
-            var create = await remote.ExecuteAsync(PowerShell(createScript), ct);
-            if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create secure Windows deployment staging directory");
-            await remote.UploadAsync(request.LocalPackageDirectory, stage, ct);
-            await remote.UploadAsync(request.LocalProfilePath, stagedProfile, ct);
-            await remote.UploadAsync(material.LocalSecretPath, stagedSecret, ct);
+            try
+            {
+                var createScript = $"$ErrorActionPreference='Stop'; $stage={Ps(stage)}; New-Item -ItemType Directory -Force -Path $stage | Out-Null; $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; & \"$env:SystemRoot\\System32\\icacls.exe\" $stage '/inheritance:r' '/grant:r' (\"*${{sid}}:(OI)(CI)F\") '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null; if ($LASTEXITCODE -ne 0) {{ throw 'Unable to secure deployment staging directory' }}";
+                var create = await remote.ExecuteAsync(PowerShell(createScript), ct);
+                if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create secure Windows deployment staging directory");
+                await remote.UploadAsync(request.LocalPackageDirectory, stage, ct);
+                await remote.UploadAsync(request.LocalProfilePath, stagedProfile, ct);
+                await remote.UploadAsync(material.LocalSecretPath, stagedSecret, ct);
 
-            var result = await remote.ExecuteAsync(PowerShell(BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
-            return result.Success
-                ? DeploymentResult.Ok("Windows service deployed")
-                : DeploymentResult.Fail("ETH402", "Windows remote installation failed and rollback was attempted");
+                var result = await remote.ExecuteAsync(PowerShell(BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
+                return result.Success
+                    ? DeploymentResult.Ok("Windows service deployed")
+                    : DeploymentResult.Fail("ETH402", "Windows remote installation failed and rollback was attempted");
+            }
+            finally
+            {
+                // The transaction normally removes staging. This also covers SCP/profile/secret upload failures
+                // before the transaction starts, so plaintext network material is not left on the remote host.
+                await CleanupStageBestEffortAsync(remote, stage);
+            }
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -45,6 +54,16 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
             return result.Success ? DeploymentResult.Ok("Windows service uninstalled") : DeploymentResult.Fail("ETH402", "Windows remote uninstall failed");
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+    }
+
+    private static async Task CleanupStageBestEffortAsync(IRemoteExecutor remote, string stage)
+    {
+        try
+        {
+            var script = $"$ErrorActionPreference='SilentlyContinue'; if (Test-Path -LiteralPath {Ps(stage)}) {{ Remove-Item -LiteralPath {Ps(stage)} -Recurse -Force }}";
+            _ = await remote.ExecuteAsync(PowerShell(script), CancellationToken.None);
+        }
+        catch { }
     }
 
     private static string BuildInstallTransaction(DeploymentRequest request, string stage, string remotePackage, string stagedProfile, string stagedSecret, string remoteSecret)
