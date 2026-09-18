@@ -10,17 +10,23 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         try
         {
             DeploymentValidation.Validate(request, ServerOsType.Linux, "scripts/linux/install-service.sh");
+            await using var material = await DeploymentProfileMaterial.CreateAsync(request, ct);
             var stage = $"/tmp/easytier-host-deploy-{Guid.NewGuid():N}";
             var remotePackage = $"{stage}/{DeploymentValidation.PackageName(request.LocalPackageDirectory)}";
             var stagedProfile = $"{stage}/network.json";
+            var stagedSecret = $"{stage}/network-secret.plain";
+            var remoteSecret = DeploymentValidation.ResolveRemoteSecretPath(request, material.SecretRelativePath);
 
-            // The SSH user owns staging so SCP works even when installation later requires sudo.
-            var create = await remote.ExecuteAsync($"bash -c {Bash($"mkdir -p -- {Bash(stage)}")}", ct);
-            if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create Linux deployment staging directory");
+            // The SSH user owns staging so SCP works; mode 0700 prevents other local users reading plaintext material.
+            var create = await remote.ExecuteAsync($"bash -c {Bash($"umask 077; mkdir -p -m 700 -- {Bash(stage)}; chmod 700 -- {Bash(stage)}")}", ct);
+            if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create secure Linux deployment staging directory");
             await remote.UploadAsync(request.LocalPackageDirectory, stage, ct);
             await remote.UploadAsync(request.LocalProfilePath, stagedProfile, ct);
+            await remote.UploadAsync(material.LocalSecretPath, stagedSecret, ct);
+            var protectSecret = await remote.ExecuteAsync($"bash -c {Bash($"chmod 600 -- {Bash(stagedSecret)}")}", ct);
+            if (!protectSecret.Success) return DeploymentResult.Fail("ETH401", "Unable to secure staged Linux network secret");
 
-            var result = await remote.ExecuteAsync(RootShell(request, BuildInstallTransaction(request, stage, remotePackage, stagedProfile)), ct);
+            var result = await remote.ExecuteAsync(RootShell(request, BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
             return result.Success
                 ? DeploymentResult.Ok("Linux service deployed")
                 : DeploymentResult.Fail("ETH402", "Linux remote installation failed and rollback was attempted");
@@ -43,7 +49,7 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
     }
 
-    private static string BuildInstallTransaction(DeploymentRequest request, string stage, string remotePackage, string stagedProfile)
+    private static string BuildInstallTransaction(DeploymentRequest request, string stage, string remotePackage, string stagedProfile, string stagedSecret, string remoteSecret)
     {
         var install = request.RemoteInstallDirectory;
         var profile = request.RemoteProfilePath;
@@ -55,32 +61,45 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine($"incoming={Bash(remotePackage)}");
         sb.AppendLine($"profile={Bash(profile)}");
         sb.AppendLine($"staged_profile={Bash(stagedProfile)}");
+        sb.AppendLine($"secret={Bash(remoteSecret)}");
+        sb.AppendLine($"staged_secret={Bash(stagedSecret)}");
         sb.AppendLine($"stage={Bash(stage)}");
         sb.AppendLine("backup_install=\"${install}.previous\"");
         sb.AppendLine("backup_profile=\"${profile}.previous\"");
+        sb.AppendLine("backup_secret=\"${secret}.previous\"");
         sb.AppendLine("had_install=false; if [[ -d \"$install\" ]]; then had_install=true; fi");
         sb.AppendLine("had_profile=false; if [[ -f \"$profile\" ]]; then had_profile=true; fi");
+        sb.AppendLine("had_secret=false; if [[ -f \"$secret\" ]]; then had_secret=true; fi");
         sb.AppendLine("if systemctl list-unit-files --type=service --no-legend \"${service}.service\" 2>/dev/null | grep -q \"${service}.service\"; then if [[ \"$had_install\" != true ]]; then echo 'foreign service ownership' >&2; exit 41; fi; fi");
         sb.AppendLine("systemctl stop \"$service\" 2>/dev/null || true");
-        sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\"");
+        sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\" \"$backup_secret\"");
         sb.AppendLine("if [[ \"$had_install\" == true ]]; then mv -- \"$install\" \"$backup_install\"; fi");
         sb.AppendLine("if [[ \"$had_profile\" == true ]]; then mv -- \"$profile\" \"$backup_profile\"; fi");
+        sb.AppendLine("if [[ \"$had_secret\" == true ]]; then mv -- \"$secret\" \"$backup_secret\"; fi");
         sb.AppendLine("rollback() {");
         sb.AppendLine("  systemctl stop \"$service\" 2>/dev/null || true");
         sb.AppendLine("  rm -rf -- \"$install\"");
         sb.AppendLine("  if [[ \"$had_install\" == true && -d \"$backup_install\" ]]; then mv -- \"$backup_install\" \"$install\"; fi");
         sb.AppendLine("  rm -f -- \"$profile\"");
         sb.AppendLine("  if [[ \"$had_profile\" == true && -f \"$backup_profile\" ]]; then mv -- \"$backup_profile\" \"$profile\"; fi");
+        sb.AppendLine("  rm -f -- \"$secret\"");
+        sb.AppendLine("  if [[ \"$had_secret\" == true && -f \"$backup_secret\" ]]; then mv -- \"$backup_secret\" \"$secret\"; fi");
+        sb.AppendLine("  rm -rf -- \"$stage\" 2>/dev/null || true");
         sb.AppendLine("  if [[ \"$had_install\" == true ]]; then systemctl start \"$service\" 2>/dev/null || true; fi");
         sb.AppendLine("}");
         sb.AppendLine("trap rollback ERR");
-        sb.AppendLine("mkdir -p -- \"$(dirname \"$install\")\" \"$(dirname \"$profile\")\"");
+        sb.AppendLine("mkdir -p -- \"$(dirname \"$install\")\" \"$(dirname \"$profile\")\" \"$(dirname \"$secret\")\"");
+        sb.AppendLine("chmod 700 -- \"$(dirname \"$profile\")\" \"$(dirname \"$secret\")\"");
         sb.AppendLine("mv -- \"$incoming\" \"$install\"");
         sb.AppendLine("cp -- \"$staged_profile\" \"$profile\"");
+        sb.AppendLine("chmod 600 -- \"$profile\" \"$staged_secret\"");
+        sb.AppendLine("\"$install/easytier-host\" set-secret \"$secret\" < \"$staged_secret\"");
+        sb.AppendLine("rm -f -- \"$staged_secret\"");
+        sb.AppendLine("chmod 600 -- \"$secret\"");
         sb.AppendLine($"chmod 700 {Bash(installer)}");
         sb.AppendLine($"{Bash(installer)} \"$install\" \"$profile\" {Bash(request.RemoteStateDirectory)} \"$service\"");
         sb.AppendLine("trap - ERR");
-        sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\"; rm -rf -- \"$stage\"");
+        sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\" \"$backup_secret\"; rm -rf -- \"$stage\"");
         return sb.ToString();
     }
 
