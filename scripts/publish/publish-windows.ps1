@@ -38,9 +38,10 @@ if ($IncludeClientUi) {
 }
 
 $kind = if ($IncludeClientUi) { 'client-windows' } else { 'server-windows' }
+# PowerShell script failures propagate under ErrorActionPreference=Stop. Do not inspect LASTEXITCODE here:
+# the metadata helper may probe optional native tools such as git and intentionally recover from failure.
 & (Join-Path $PSScriptRoot 'write-package-metadata.ps1') `
     -PackageDirectory $out -RuntimeIdentifier $RuntimeIdentifier -PackageKind $kind
-if ($LASTEXITCODE -ne 0) { throw 'Package metadata generation failed' }
 
 Write-Host "Windows package created: $out"
 if ($IncludeClientUi) { Write-Host "Client UI: client-ui/EasyTierHost.Client.Windows.exe" }
