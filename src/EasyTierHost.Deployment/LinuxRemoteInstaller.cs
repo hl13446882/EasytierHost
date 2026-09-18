@@ -108,6 +108,10 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine("mkdir -p -- \"$(dirname \"$install\")\" \"$(dirname \"$profile\")\" \"$(dirname \"$secret\")\"");
         sb.AppendLine("chmod 700 -- \"$(dirname \"$profile\")\" \"$(dirname \"$secret\")\"");
         sb.AppendLine("mv -- \"$incoming\" \"$install\"");
+        // Packages are commonly produced/uploaded from Windows, where Unix execute bits are not preserved.
+        // Restore only the known executables and our own scripts before invoking any of them.
+        sb.AppendLine("chmod 700 -- \"$install/easytier-host\" \"$install/easytier-core\" \"$install/easytier-cli\"");
+        sb.AppendLine("if [[ -d \"$install/scripts/linux\" ]]; then find \"$install/scripts/linux\" -maxdepth 1 -type f -name '*.sh' -exec chmod 700 -- {} +; fi");
         sb.AppendLine("cp -- \"$staged_profile\" \"$profile\"");
         sb.AppendLine("chmod 600 -- \"$profile\" \"$staged_secret\"");
         sb.AppendLine("\"$install/easytier-host\" set-secret \"$secret\" < \"$staged_secret\"");
