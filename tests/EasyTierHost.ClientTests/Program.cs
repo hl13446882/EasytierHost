@@ -7,7 +7,7 @@ foreach (var (name, test) in new (string Name, Action Test)[]
 {
     ("Client profile uses DHCP role and optional gateway", ClientProfile),
     ("Client profile rejects overlay Seed address", RejectOverlaySeed),
-    ("Client profile never serializes network secret", SecretNotSerialized)
+    ("Client profile stores only a secret-file reference", SecretNotSerialized)
 })
 {
     try { test(); Console.WriteLine($"PASS {name}"); }
@@ -48,8 +48,8 @@ static void RejectOverlaySeed()
 
 static void SecretNotSerialized()
 {
-    const string marker = "must-never-appear-in-profile";
     var json = JsonSerializer.Serialize(Build(), ConfigurationStore.Json);
-    Check(!json.Contains(marker, StringComparison.Ordinal), "secret leaked into profile");
-    Check(json.Contains("network.secret", StringComparison.Ordinal), "secret file reference missing");
+    Check(json.Contains("\"secretFile\"", StringComparison.Ordinal), "secret file reference missing");
+    Check(json.Contains("network.secret", StringComparison.Ordinal), "secret file path missing");
+    Check(!json.Contains("networkSecret", StringComparison.OrdinalIgnoreCase), "profile contains a network-secret field");
 }
