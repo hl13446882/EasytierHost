@@ -30,8 +30,8 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
 
                 var result = await remote.ExecuteAsync(RootShell(request, BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
                 return result.Success
-                    ? DeploymentResult.Ok("Linux service deployed")
-                    : DeploymentResult.Fail("ETH402", "Linux remote installation failed and rollback was attempted");
+                    ? DeploymentResult.Ok("Linux service deployed and node readiness verified")
+                    : DeploymentResult.Fail("ETH402", "Linux remote installation failed or readiness did not converge; rollback was attempted");
             }
             finally
             {
@@ -115,6 +115,12 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine("chmod 600 -- \"$secret\"");
         sb.AppendLine($"chmod 700 {Bash(installer)}");
         sb.AppendLine($"{Bash(installer)} \"$install\" \"$profile\" {Bash(request.RemoteStateDirectory)} \"$service\"");
+        sb.AppendLine("ready=false");
+        sb.AppendLine("for _ in $(seq 1 45); do");
+        sb.AppendLine("  if \"$install/easytier-host\" ready \"$profile\" >/dev/null 2>&1; then ready=true; break; fi");
+        sb.AppendLine("  sleep 2");
+        sb.AppendLine("done");
+        sb.AppendLine("if [[ \"$ready\" != true ]]; then echo 'EasyTierHost node readiness did not converge within 90 seconds' >&2; false; fi");
         sb.AppendLine("trap - ERR");
         sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\" \"$backup_secret\"; rm -rf -- \"$stage\"");
         return sb.ToString();
