@@ -7,14 +7,14 @@ static void Check(bool condition, string message)
     if (!condition) throw new Exception(message);
 }
 
-static async Task ExpectFailure(Func<Task> action, string message)
+static async Task ExpectAsyncFailure(Func<Task> action, string message)
 {
     try { await action(); }
     catch { return; }
     throw new Exception(message);
 }
 
-static void ExpectFailure(Action action, string message)
+static void ExpectSyncFailure(Action action, string message)
 {
     try { action(); }
     catch { return; }
@@ -48,7 +48,7 @@ try
     Check(loaded.Files.Count == 2, "Manifest round trip changed file count");
 
     await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "tampered");
-    await ExpectFailure(() => manifest.ValidateAsync(root), "Tampered artifact was accepted");
+    await ExpectAsyncFailure(() => manifest.ValidateAsync(root), "Tampered artifact was accepted");
 }
 finally
 {
@@ -57,9 +57,9 @@ finally
 
 Check(DeploymentProfileRules.NormalizeSecretRelativePath("network.secret") == "network.secret", "Simple relative secret path changed");
 Check(DeploymentProfileRules.NormalizeSecretRelativePath("private\\network.secret") == "private/network.secret", "Nested secret path was not normalized");
-ExpectFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("../network.secret"), "Parent traversal secret path was accepted");
-ExpectFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("/etc/easytier/network.secret"), "Unix absolute secret path was accepted");
-ExpectFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("C:\\ProgramData\\network.secret"), "Windows absolute secret path was accepted");
+ExpectSyncFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("../network.secret"), "Parent traversal secret path was accepted");
+ExpectSyncFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("/etc/easytier/network.secret"), "Unix absolute secret path was accepted");
+ExpectSyncFailure(() => DeploymentProfileRules.NormalizeSecretRelativePath("C:\\ProgramData\\network.secret"), "Windows absolute secret path was accepted");
 
 var profileRoot = Path.Combine(Path.GetTempPath(), "eth-deployment-profile-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(profileRoot);
@@ -88,11 +88,11 @@ try
     };
     var validated = await DeploymentProfileRules.ValidateAsync(request);
     Check(validated.Role == NodeRole.Seed, "Matching deployment role was changed");
-    await ExpectFailure(async () => { _ = await DeploymentProfileRules.ValidateAsync(request with { Role = NodeRole.Gateway }); }, "Role/profile mismatch was accepted");
+    await ExpectAsyncFailure(async () => { _ = await DeploymentProfileRules.ValidateAsync(request with { Role = NodeRole.Gateway }); }, "Role/profile mismatch was accepted");
 
     var nonPortable = profile with { SecretFile = "C:/ProgramData/EasyTierHost/network.secret" };
     await File.WriteAllTextAsync(profilePath, JsonSerializer.Serialize(nonPortable));
-    await ExpectFailure(async () => { _ = await DeploymentProfileRules.ValidateAsync(request); }, "Absolute secret path was accepted for remote deployment");
+    await ExpectAsyncFailure(async () => { _ = await DeploymentProfileRules.ValidateAsync(request); }, "Absolute secret path was accepted for remote deployment");
 }
 finally
 {
@@ -101,7 +101,7 @@ finally
 
 await using (var remote = new SshRemoteExecutor(credential))
 {
-    await ExpectFailure(() => remote.ExecuteAsync("echo should-not-run", CancellationToken.None), "Password authentication was passed to a child process");
+    await ExpectAsyncFailure(() => remote.ExecuteAsync("echo should-not-run", CancellationToken.None), "Password authentication was passed to a child process");
 }
 
 Console.WriteLine("PASS deployment manifest, profile portability and credential safety tests");
