@@ -94,7 +94,7 @@ internal static class DeploymentValidation
         if (string.IsNullOrWhiteSpace(path) || path.IndexOfAny(['\r', '\n', '\0']) >= 0)
             throw new HostException("ETH003", "Secret file path is invalid");
         var normalized = path.Replace('\\', '/');
-        if (normalized.StartsWith('/', StringComparison.Ordinal) || LooksLikeWindowsAbsolutePath(normalized))
+        if (normalized.StartsWith("/", StringComparison.Ordinal) || LooksLikeWindowsAbsolutePath(normalized))
             throw new HostException("ETH003", "Remote deployment requires a relative secret file path");
         var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length == 0 || segments.Any(s => s is "." or ".."))
@@ -145,7 +145,7 @@ internal static class DeploymentValidation
         if (string.IsNullOrWhiteSpace(value) || value.IndexOfAny(['\r', '\n', '\0']) >= 0)
             throw new HostException("ETH003", $"{label} path is invalid");
         var normalized = value.Replace('\\', '/');
-        if (normalized.StartsWith('/', StringComparison.Ordinal) || LooksLikeWindowsAbsolutePath(normalized) || normalized.Split('/').Any(s => s == ".."))
+        if (normalized.StartsWith("/", StringComparison.Ordinal) || LooksLikeWindowsAbsolutePath(normalized) || normalized.Split('/').Any(s => s == ".."))
             throw new HostException("ETH003", $"Remote deployment requires a portable relative {label} path");
     }
 
