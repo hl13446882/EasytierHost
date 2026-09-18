@@ -28,8 +28,8 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
 
                 var result = await remote.ExecuteAsync(PowerShell(BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
                 return result.Success
-                    ? DeploymentResult.Ok("Windows service deployed")
-                    : DeploymentResult.Fail("ETH402", "Windows remote installation failed and rollback was attempted");
+                    ? DeploymentResult.Ok("Windows service deployed and node readiness verified")
+                    : DeploymentResult.Fail("ETH402", "Windows remote installation failed or readiness did not converge; rollback was attempted");
             }
             finally
             {
@@ -114,6 +114,13 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         sb.AppendLine("  Remove-Item -LiteralPath $stagedSecret -Force");
         sb.AppendLine($"  & {Ps(installer)} -InstallRoot $install -ProfilePath $profile -StateDirectory {Ps(state)} -ServiceName $serviceName");
         sb.AppendLine("  if ($LASTEXITCODE -ne 0) { throw 'Service installer returned failure' }");
+        sb.AppendLine("  $ready=$false");
+        sb.AppendLine("  for ($i=0; $i -lt 45; $i++) {");
+        sb.AppendLine("    & $hostExe ready $profile *> $null");
+        sb.AppendLine("    if ($LASTEXITCODE -eq 0) { $ready=$true; break }");
+        sb.AppendLine("    Start-Sleep -Seconds 2");
+        sb.AppendLine("  }");
+        sb.AppendLine("  if (-not $ready) { throw 'EasyTierHost node readiness did not converge within 90 seconds' }");
         sb.AppendLine("  if (Test-Path -LiteralPath $backupInstall) { Remove-Item -LiteralPath $backupInstall -Recurse -Force }");
         sb.AppendLine("  if (Test-Path -LiteralPath $backupProfile) { Remove-Item -LiteralPath $backupProfile -Force }");
         sb.AppendLine("  if (Test-Path -LiteralPath $backupSecret) { Remove-Item -LiteralPath $backupSecret -Force }");
