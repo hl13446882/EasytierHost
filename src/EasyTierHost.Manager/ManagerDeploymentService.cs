@@ -52,19 +52,7 @@ public sealed class ManagerDeploymentService
             var profile = BuildProfile(options);
             await ConfigurationStore.SaveAtomicAsync(profilePath, profile, ct);
 
-            var layout = RemoteLayout.For(options.OsType);
-            var request = new DeploymentRequest
-            {
-                OsType = options.OsType,
-                Role = options.Role,
-                Remote = Credential(options),
-                LocalPackageDirectory = Path.GetFullPath(options.LocalPackageDirectory),
-                RemoteInstallDirectory = layout.InstallDirectory,
-                LocalProfilePath = profilePath,
-                RemoteProfilePath = layout.ProfilePath,
-                RemoteStateDirectory = layout.StateDirectory,
-                ServiceName = layout.ServiceName
-            };
+            var request = CreateRequest(options, profilePath);
             return await new DeploymentService().InstallAsync(request, ct);
         }
         finally
@@ -72,6 +60,37 @@ public sealed class ManagerDeploymentService
             try { if (Directory.Exists(workspace)) Directory.Delete(workspace, recursive: true); }
             catch { }
         }
+    }
+
+    public async Task<DeploymentResult> UninstallAsync(ManagerDeploymentOptions options, CancellationToken ct = default)
+    {
+        try
+        {
+            ValidateRemoteOptions(options);
+            var placeholderProfile = Path.Combine(Path.GetTempPath(), "easytier-host-uninstall-unused.json");
+            var request = CreateRequest(options, placeholderProfile);
+            return await new DeploymentService().UninstallAsync(request, ct);
+        }
+        catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        { return DeploymentResult.Fail("ETH402", "Remote uninstall preparation failed"); }
+    }
+
+    private static DeploymentRequest CreateRequest(ManagerDeploymentOptions options, string localProfilePath)
+    {
+        var layout = RemoteLayout.For(options.OsType);
+        return new DeploymentRequest
+        {
+            OsType = options.OsType,
+            Role = options.Role,
+            Remote = Credential(options),
+            LocalPackageDirectory = string.IsNullOrWhiteSpace(options.LocalPackageDirectory) ? "." : Path.GetFullPath(options.LocalPackageDirectory),
+            RemoteInstallDirectory = layout.InstallDirectory,
+            LocalProfilePath = localProfilePath,
+            RemoteProfilePath = layout.ProfilePath,
+            RemoteStateDirectory = layout.StateDirectory,
+            ServiceName = layout.ServiceName
+        };
     }
 
     private static RemoteHostCredential Credential(ManagerDeploymentOptions options) => new()
