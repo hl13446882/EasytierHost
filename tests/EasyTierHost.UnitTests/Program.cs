@@ -154,9 +154,10 @@ static Task LinuxRouteIdentity()
 static async Task DnsForwarding()
 {
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-    using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-    var upstream = (IPEndPoint)udp.Client.LocalEndPoint!;
-    var tcp = new TcpListener(upstream); tcp.Start();
+    var tcp = new TcpListener(IPAddress.Loopback, 0);
+    tcp.Start();
+    var upstream = (IPEndPoint)tcp.LocalEndpoint;
+    using var udp = new UdpClient(upstream);
     byte[] query = [0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, (byte)'a', 0, 0, 1, 0, 1];
     var udpServer = Task.Run(async () => { var packet = await udp.ReceiveAsync(timeout.Token); packet.Buffer[2] |= 0x80; await udp.SendAsync(packet.Buffer, packet.RemoteEndPoint, timeout.Token); });
     var tcpServer = Task.Run(async () => { using var client = await tcp.AcceptTcpClientAsync(timeout.Token); var stream = client.GetStream(); byte[] frame = new byte[query.Length + 2]; await stream.ReadExactlyAsync(frame, timeout.Token); frame[4] |= 0x80; await stream.WriteAsync(frame, timeout.Token); });
