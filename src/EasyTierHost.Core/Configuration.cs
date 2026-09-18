@@ -69,8 +69,27 @@ public static class ConfigurationStore
         var profile = JsonSerializer.Deserialize<NetworkProfile>(await File.ReadAllTextAsync(path, ct), Json) ?? throw new HostException("ETH003", "Empty profile");
         NetworkProfileValidator.Validate(profile);
         var root = Path.GetDirectoryName(Path.GetFullPath(path))!;
-        return profile with { SecretFile = Path.GetFullPath(profile.SecretFile, root) };
+        return profile with
+        {
+            SecretFile = Path.GetFullPath(profile.SecretFile, root),
+            CorePath = ResolveExecutable(profile.CorePath),
+            CliPath = ResolveExecutable(profile.CliPath)
+        };
     }
+
+    private static string ResolveExecutable(string configured)
+    {
+        if (Path.IsPathRooted(configured)) return Path.GetFullPath(configured);
+        var candidate = Path.GetFullPath(configured, AppContext.BaseDirectory);
+        if (File.Exists(candidate)) return candidate;
+        if (OperatingSystem.IsWindows() && string.IsNullOrEmpty(Path.GetExtension(candidate)) && File.Exists(candidate + ".exe"))
+            return candidate + ".exe";
+        if (configured.Contains(Path.DirectorySeparatorChar) || configured.Contains(Path.AltDirectorySeparatorChar))
+            return candidate;
+        // Preserve PATH lookup for development environments that do not bundle Core beside Host.
+        return configured;
+    }
+
     public static async Task SaveAtomicAsync<T>(string path, T value, CancellationToken ct = default)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
