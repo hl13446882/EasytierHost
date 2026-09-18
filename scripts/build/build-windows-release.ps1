@@ -31,15 +31,16 @@ function Invoke-Native([scriptblock] $Action, [string] $Label) {
 Assert-RelativeOutput $OutputRoot
 Assert-Command 'dotnet' 'Install .NET 8 SDK or newer.'
 Assert-Command 'cargo' 'Install Rust stable with rustup.'
+Assert-Command 'rustup' 'Install Rust with rustup.'
 Assert-Command 'protoc' 'Install Protocol Buffers compiler and add it to PATH.'
 Assert-Command '7z' 'Install 7-Zip and add 7z.exe to PATH.'
 
 Push-Location $repo
 try {
     Write-Host '== EasyTierHost Windows release build =='
-    Write-Host "RID:          $RuntimeIdentifier"
+    Write-Host "RID:           $RuntimeIdentifier"
     Write-Host "Configuration: $Configuration"
-    Write-Host "Output:       $OutputRoot"
+    Write-Host "Output:        $OutputRoot"
 
     Invoke-Native { dotnet build EasyTierHost.sln -c $Configuration --nologo } 'Host solution build'
     Invoke-Native { dotnet build src/EasyTierHost.Deployment/EasyTierHost.Deployment.csproj -c $Configuration --nologo } 'Deployment build'
@@ -59,10 +60,15 @@ try {
     }
 
     $easyTier = Join-Path $repo 'EasyTier-2.6.4'
+    $nativeArch = if ($RuntimeIdentifier -eq 'win-arm64') { 'arm64' } else { 'x86_64' }
+    $nativeDirectory = Join-Path $easyTier "easytier/third_party/$nativeArch"
+    if (-not (Test-Path -LiteralPath $nativeDirectory -PathType Container)) { throw "Missing EasyTier native directory: $nativeDirectory" }
+
     Push-Location $easyTier
     try {
-        $env:PATH = "$easyTier/easytier/third_party/x86_64;C:/Program Files/7-Zip;" + $env:PATH
+        $env:PATH = "$nativeDirectory;C:/Program Files/7-Zip;" + $env:PATH
         if (-not $SkipTests) {
+            # Targeted tests run on the build host before any cross-target release build.
             Invoke-Native { cargo +stable test -p easytier --lib common::config::dhcp_range --no-default-features --features tun } 'EasyTier DHCP tests'
             Invoke-Native { cargo +stable test -p easytier --lib underlay_ --no-default-features --features tun } 'EasyTier underlay tests'
         }
