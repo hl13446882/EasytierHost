@@ -17,19 +17,27 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
             var stagedSecret = $"{stage}/network-secret.plain";
             var remoteSecret = DeploymentValidation.ResolveRemoteSecretPath(request, material.SecretRelativePath);
 
-            // The SSH user owns staging so SCP works; mode 0700 prevents other local users reading plaintext material.
-            var create = await remote.ExecuteAsync($"bash -c {Bash($"umask 077; mkdir -p -m 700 -- {Bash(stage)}; chmod 700 -- {Bash(stage)}")}", ct);
-            if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create secure Linux deployment staging directory");
-            await remote.UploadAsync(request.LocalPackageDirectory, stage, ct);
-            await remote.UploadAsync(request.LocalProfilePath, stagedProfile, ct);
-            await remote.UploadAsync(material.LocalSecretPath, stagedSecret, ct);
-            var protectSecret = await remote.ExecuteAsync($"bash -c {Bash($"chmod 600 -- {Bash(stagedSecret)}")}", ct);
-            if (!protectSecret.Success) return DeploymentResult.Fail("ETH401", "Unable to secure staged Linux network secret");
+            try
+            {
+                // The SSH user owns staging so SCP works; mode 0700 prevents other local users reading plaintext material.
+                var create = await remote.ExecuteAsync($"bash -c {Bash($"umask 077; mkdir -p -m 700 -- {Bash(stage)}; chmod 700 -- {Bash(stage)}")}", ct);
+                if (!create.Success) return DeploymentResult.Fail("ETH401", "Unable to create secure Linux deployment staging directory");
+                await remote.UploadAsync(request.LocalPackageDirectory, stage, ct);
+                await remote.UploadAsync(request.LocalProfilePath, stagedProfile, ct);
+                await remote.UploadAsync(material.LocalSecretPath, stagedSecret, ct);
+                var protectSecret = await remote.ExecuteAsync($"bash -c {Bash($"chmod 600 -- {Bash(stagedSecret)}")}", ct);
+                if (!protectSecret.Success) return DeploymentResult.Fail("ETH401", "Unable to secure staged Linux network secret");
 
-            var result = await remote.ExecuteAsync(RootShell(request, BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
-            return result.Success
-                ? DeploymentResult.Ok("Linux service deployed")
-                : DeploymentResult.Fail("ETH402", "Linux remote installation failed and rollback was attempted");
+                var result = await remote.ExecuteAsync(RootShell(request, BuildInstallTransaction(request, stage, remotePackage, stagedProfile, stagedSecret, remoteSecret)), ct);
+                return result.Success
+                    ? DeploymentResult.Ok("Linux service deployed")
+                    : DeploymentResult.Fail("ETH402", "Linux remote installation failed and rollback was attempted");
+            }
+            finally
+            {
+                // Covers SCP/profile/secret upload failures before the root transaction starts.
+                await CleanupStageBestEffortAsync(remote, stage);
+            }
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -47,6 +55,15 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
             return result.Success ? DeploymentResult.Ok("Linux service uninstalled") : DeploymentResult.Fail("ETH402", "Linux remote uninstall failed");
         }
         catch (HostException ex) { return DeploymentResult.Fail(ex.Code, ex.Message); }
+    }
+
+    private static async Task CleanupStageBestEffortAsync(IRemoteExecutor remote, string stage)
+    {
+        try
+        {
+            _ = await remote.ExecuteAsync($"bash -c {Bash($"rm -rf -- {Bash(stage)}")}", CancellationToken.None);
+        }
+        catch { }
     }
 
     private static string BuildInstallTransaction(DeploymentRequest request, string stage, string remotePackage, string stagedProfile, string stagedSecret, string remoteSecret)
