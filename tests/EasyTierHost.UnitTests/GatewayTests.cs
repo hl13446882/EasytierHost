@@ -17,6 +17,7 @@ static class GatewayTests
         ("Gateway rejects cross-platform recovery journal", CrossPlatform),
         ("Linux NAT has precise prefix/interface and no ruleset flush", LinuxRules),
         ("Linux refuses removal of foreign table", LinuxOwnership),
+        ("Linux NAT falls back to owned iptables rule", LinuxIptablesFallback),
         ("DNS question correlation and compression loop rejection", DnsValidation),
         ("DNS mismatched upstream falls back", DnsFallback),
         ("DNS forwarder real UDP/TCP listeners and stop", DnsListeners),
@@ -88,6 +89,21 @@ static class GatewayTests
         await Fail(() => platform.RemoveNatAsync(new("eth_123", "123", "linux", Physical, Overlay, false, []), default));
         Assert(!runner.Commands.Any(a => a.Contains("delete")));
     }
+    private static async Task LinuxIptablesFallback()
+    {
+        var runner = new FallbackRunner();
+        var platform = new LinuxNatManager(runner);
+        var snapshot = await platform.CaptureAsync(Physical, Overlay, default);
+        Assert(snapshot.ResourceName.StartsWith("ipt_", StringComparison.Ordinal));
+        var args = LinuxNatManager.IptablesRuleArguments(snapshot, "-A");
+        Assert(args.Contains("10.10.0.0/16") && args.Contains("wan0") && args.Contains("EasyTierHost:" + snapshot.OwnerToken));
+        await platform.EnableForwardingAsync(snapshot, default);
+        await platform.CreateNatAsync(snapshot, default);
+        Assert(runner.Rule && runner.Forwarding && await platform.VerifyAsync(snapshot, default));
+        await platform.RemoveNatAsync(snapshot, default);
+        await platform.RestoreForwardingAsync(snapshot, default);
+        Assert(!runner.Rule && !runner.Forwarding);
+    }
     private static Task DnsValidation()
     {
         var query = DnsMessage.CreateQuery("example.com"); var response = query.ToArray(); response[2] |= 0x80;
@@ -130,7 +146,6 @@ static class GatewayTests
             Assert(DnsMessage.IsResponseTo(query, await DnsMessage.ExchangeAsync(listen, query, false, timeout.Token)));
             Assert(DnsMessage.IsResponseTo(query, await DnsMessage.ExchangeAsync(listen, query, true, timeout.Token)));
             await runtime.StopAsync(timeout.Token); await Task.WhenAll(udpTask, tcpTask);
-            // Confirm both listening sockets were released.
             using var reboundUdp = new UdpClient(listen); var reboundTcp = new TcpListener(listen); reboundTcp.Start(); reboundTcp.Stop();
         }
         finally { tcpUpstream.Stop(); }
@@ -172,6 +187,34 @@ static class GatewayTests
         {
             var a = args.ToArray(); Commands.Add(a);
             return Task.FromResult(a.Contains("tables") ? "{\"nftables\":[{\"table\":{\"family\":\"ip\",\"name\":\"eth_123\"}}]}" : "{\"nftables\":[{\"table\":{\"family\":\"ip\",\"name\":\"eth_123\",\"comment\":\"another-owner\"}}]}");
+        }
+    }
+    private sealed class FallbackRunner : ICommandRunner
+    {
+        public bool Rule { get; private set; }
+        public bool Forwarding { get; private set; }
+        public Task<CommandResult> RunAsync(string executable, IEnumerable<string> args, CancellationToken ct = default, string? input = null)
+        {
+            var a = args.ToArray();
+            if (executable == "nft") return Task.FromResult(new CommandResult(1, "", "not available"));
+            if (executable == "iptables" && a.Contains("-C")) return Task.FromResult(new CommandResult(Rule ? 0 : 1, "", ""));
+            return Task.FromResult(new CommandResult(0, "", ""));
+        }
+        public Task<string> CheckedAsync(string executable, IEnumerable<string> args, CancellationToken ct = default, string? input = null)
+        {
+            var a = args.ToArray();
+            if (executable == "sysctl")
+            {
+                if (a.Contains("-w")) Forwarding = a.Last().EndsWith("=1", StringComparison.Ordinal);
+                return Task.FromResult(Forwarding ? "1" : "0");
+            }
+            if (executable == "iptables")
+            {
+                if (a.Contains("-A")) Rule = true;
+                if (a.Contains("-D")) Rule = false;
+                return Task.FromResult(string.Empty);
+            }
+            throw new InvalidOperationException("Unexpected command");
         }
     }
 }

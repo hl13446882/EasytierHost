@@ -61,10 +61,10 @@ if ($exists) {
         if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop existing service '$ServiceName'." }
         Wait-ServiceState $ServiceName 'STOPPED'
     }
-    Invoke-Sc config $ServiceName 'binPath=' $binaryPath 'start=' auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
+    Invoke-Sc config $ServiceName 'binPath=' $binaryPath 'start=' delayed-auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
 }
 else {
-    Invoke-Sc create $ServiceName 'binPath=' $binaryPath 'start=' auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
+    Invoke-Sc create $ServiceName 'binPath=' $binaryPath 'start=' delayed-auto 'obj=' LocalSystem 'DisplayName=' $DisplayName
 }
 
 Invoke-Sc description $ServiceName 'EasyTierHost owns EasyTier Core, overlay gateway/DNS and transactional route recovery.'
@@ -74,9 +74,11 @@ Invoke-Sc failureflag $ServiceName 1
 # Give STOP/PRESHUTDOWN enough time to remove owned DNS/routes and persist recovery state.
 $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
 New-ItemProperty -Path $serviceKey -Name PreshutdownTimeout -PropertyType DWord -Value 30000 -Force | Out-Null
+New-ItemProperty -Path $serviceKey -Name DelayedAutoStart -PropertyType DWord -Value 1 -Force | Out-Null
 
 Invoke-Sc start $ServiceName
 Wait-ServiceState $ServiceName 'RUNNING' 30
 Write-Host "Installed and started $ServiceName."
+Write-Host "Startup: Automatic (Delayed Start)"
 Write-Host "Profile: $ProfilePath"
 Write-Host "State:   $StateDirectory"
