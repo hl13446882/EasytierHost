@@ -1,6 +1,6 @@
 # EasyTierHost
 
-基于 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。当前开发分支已覆盖受限 DHCP、四角色配置、Host 进程守护、Gateway NAT/forwarding/DNS 生命周期、Underlay 防递归、Client Internet 路由事务、Windows SCM/Linux systemd 服务化、SSH 远程部署、管理端 WPF，以及普通 Windows/Linux 客户端控制入口。**Seed + Gateway + 两个 Client 的多节点实机验收仍未完成，因此 Internet Gateway 仍属于预览功能，不能视为生产放行。**具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
+基于 EasyTier 2.6.4 源码实现的 **0.2 开发预览版**。当前开发分支已覆盖受限 DHCP、四角色配置、Host 进程守护、Gateway NAT/forwarding/DNS 生命周期、Underlay 防递归、Client Internet 路由事务、Windows SCM/Linux systemd 服务化、SSH 远程部署、管理端 WPF、普通 Windows/Linux 客户端控制入口、结构化诊断以及发布包完整性校验。**Seed + Gateway + 两个 Client 的多节点实机验收仍未完成，因此 Internet Gateway 仍属于预览功能，不能视为生产放行。**具体边界见 [实施状态](docs/IMPLEMENTATION-STATUS.md)。
 
 ## 构建与测试
 
@@ -12,6 +12,7 @@ dotnet build src/EasyTierHost.Manager/EasyTierHost.Manager.csproj
 dotnet build src/EasyTierHost.Client.Windows/EasyTierHost.Client.Windows.csproj
 dotnet run --project tests/EasyTierHost.UnitTests
 dotnet run --project tests/EasyTierHost.ClientTests
+dotnet run --project tests/EasyTierHost.DiagnosticsTests
 dotnet run --project tests/EasyTierHost.IntegrationTests
 dotnet run --project tests/EasyTierHost.DeploymentTests
 
@@ -22,7 +23,7 @@ cargo +stable test -p easytier --lib underlay_ --no-default-features --features 
 cargo +stable build -p easytier --no-default-features --features tun --bin easytier-core --bin easytier-cli
 ```
 
-`.github/workflows/host-ci.yml` 在 Windows runner 上执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Integration/Deployment 测试以及 EasyTier DHCP/Underlay 针对性 Rust 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 Packet.dll 与 wintun.dll；发布包应携带对应原生依赖。
+`.github/workflows/host-ci.yml` 在 Windows runner 上执行 Host/Deployment/Manager/Windows Client 编译、PowerShell/Bash 语法检查、Host/Client/Diagnostics/Integration/Deployment 测试、Windows/Linux 发布结构与 manifest smoke，以及 EasyTier DHCP/Underlay 针对性 Rust 测试。`tun` 构建支持预览版使用的 TCP/UDP Overlay；完整传输集合可用上游默认 features 构建。Windows 运行需要 EasyTier 的 Packet.dll 与 wintun.dll；发布包应携带对应原生依赖。
 
 ## 地址与角色
 
@@ -39,10 +40,12 @@ easytier-host run C:/your-private-config/network.json C:/your-private-state
 
 easytier-host status C:/your-private-config/network.json
 easytier-host ready C:/your-private-config/network.json
-easytier-host diagnostics C:/your-private-config/network.json
+easytier-host diagnostics C:/your-private-config/network.json C:/your-private-state
 ```
 
 `set-secret` 从 stdin/交互终端读取，不把 secret 放入命令行参数。Windows 使用 DPAPI machine scope 并依赖私有目录 ACL；Linux secret 必须为 0600。`secretFile` 相对路径以 profile 所在目录为基准。`configure` 生成的 Core TOML 含明文 network secret，只能写入受保护目录并在运行后清理。
+
+`diagnostics` 的 state directory 为可选参数，但实机运维建议传入。输出为固定 JSON 合同，包括 BuildId/CoreBase、角色、Core PID/运行态、物理网卡/IP/网关/DNS、Overlay IP、Peer 数、Gateway 状态、受保护 endpoint、最近脱敏错误，以及 Windows `/0`/`/1` 的 RouteMetric、InterfaceMetric、TotalMetric。诊断不读取 network secret；未知异常只持久化异常类型，不保存原始 Message。
 
 ## Client Internet Gateway
 
@@ -102,8 +105,14 @@ publish/client-windows
 publish/client-linux
 ```
 
-`publish/client-windows` 额外包含 `client-ui`。每个发布目录使用 SHA-256 manifest 做部署前完整性校验。Windows 服务脚本位于 `scripts/windows`，Linux systemd 安装/卸载脚本位于 `scripts/linux`。
+`publish/client-windows` 额外包含 `client-ui`。每个发布目录统一生成 `version.txt`、`sha256.txt` 和 `artifact-manifest.json`。可用：
+
+```powershell
+scripts/publish/verify-package.ps1 -PackageDirectory publish/client-windows -ExpectedPackageKind client-windows
+```
+
+校验 manifest 路径、文件数量、长度、SHA-256、必需组件，并拒绝把 `.secret` 或 `core.toml` 打进发布包。CI 中的发布 smoke 使用 sentinel Core/CLI 只验证发布管线和完整性算法；正式候选包仍必须使用真实 Release Core/CLI 构建并实机安装。
 
 ## 当前验收边界
 
-自动测试不能替代真实网络验收。正式放行前仍必须使用独立 Seed + Gateway + Client A + Client B 验证：Client↔Client、Client 经 `.1` 上网、DNS、P2P/Relay 路径、Seed RTT、Gateway/Seed 故障、物理网卡切换、休眠恢复、断电 journal 恢复，以及 Windows/Linux 抓包确认 Underlay 的 Seed/Peer/STUN/DNS/打洞流量始终从物理网发出。
+自动测试不能替代真实网络验收。正式放行前按照 [四节点实机验收方案](docs/FOUR-NODE-VALIDATION.md)，使用独立 Seed + Gateway + Client A + Client B 验证：Client↔Client、Client 经 `.1` 上网、DNS、P2P/Relay 路径、Seed RTT、Gateway/Seed 故障、物理网卡切换、休眠恢复、断电 journal 恢复，以及 Windows/Linux 抓包确认 Underlay 的 Seed/Peer/STUN/DNS/打洞流量始终从物理网发出。仓库已提供 `scripts/validation` 下的 Windows/Linux 证据采集脚本和 Windows 节点契约断言脚本。
