@@ -1,57 +1,51 @@
 # EasyTierHost 编译、发布与部署说明书
 
-> 适用版本：0.2 开发预览版（EasyTier 2.6.4 patched）
+> 适用版本：0.2 开发预览版，基于 patched EasyTier 2.6.4。
 >
-> 目标：用统一脚本完成源码编译、测试、发布包生成、完整性校验和节点部署。Internet Gateway 在完成 Seed + Gateway + 两个 Client 的多机实机验收前仍属于预览功能。
+> 本文给出标准编译、自动发布、安装、远程部署、升级、回滚和验收流程。Internet Gateway 在四节点实机验收完成前仍按预览功能管理。
 
-## 1. 组件与角色
-
-EasyTierHost 使用四类角色：
+## 1. 网络与角色基线
 
 | 角色 | Overlay 地址 | 说明 |
 |---|---|---|
-| Seed | 无业务 TUN 地址 | 只负责虚拟网发现/维护，不作为业务网关 |
-| Gateway | `10.10.0.1/16` | DNS + Internet Gateway |
+| Seed | 无业务 TUN 地址 | 只维护虚拟网发现/连接，不承担业务网关 |
+| Gateway | `10.10.0.1/16` | Internet Gateway + DNS |
 | Dedicated | `10.10.0.2–10.10.0.10/16` | 专用静态节点 |
-| Client | `10.10.0.11–10.10.255.254/16` | 普通用户，DHCP 分配 |
+| Client | `10.10.0.11–10.10.255.254/16` | 普通用户，受限 DHCP 分配 |
 
-整个 Overlay 为 `10.10.0.0/16`。`10.10.0.0` 是网络地址，`10.10.255.255` 是广播地址，均不得分配给节点。
+Overlay 固定为 `10.10.0.0/16`。`10.10.0.0` 为网络地址，`10.10.255.255` 为广播地址，均不得分配。
 
-Gateway 与 Dedicated 共用同一服务器发布包；运行角色由 `network.json` 决定，不需要单独的 gateway 二进制包。
+Gateway 与 Dedicated 使用相同服务器发布包，角色由 `network.json` 决定，不维护第二套 Gateway 二进制目录。
 
-## 2. 源码目录
-
-关键目录：
+## 2. 目录约定
 
 ```text
 EasyTierHost/
 ├─ EasyTier-2.6.4/                 patched EasyTier 源码
 ├─ src/                            EasyTierHost .NET 源码
-├─ config/templates/               Seed/Gateway/Dedicated/Client 模板
-├─ scripts/build/                  一键 Release 构建
-├─ scripts/publish/                打包、manifest、校验
+├─ config/templates/               四类角色配置模板
+├─ scripts/build/                  一键 Release 编译
+├─ scripts/publish/                打包、元数据、manifest、校验
 ├─ scripts/windows/                Windows SCM 安装/卸载
 ├─ scripts/linux/                  Linux systemd 与 Client 控制
-├─ scripts/validation/             实机证据采集
-├─ docs/                           设计、运维、验收文档
-└─ publish/                        构建输出（不应手工编辑）
+├─ scripts/validation/             实机/隔离网络验收工具
+├─ docs/                           运维与验收文档
+└─ publish/                        构建输出，不应手工修改
 ```
 
-## 3. 编译环境
+## 3. Windows 编译环境
 
-### 3.1 Windows
+推荐 Windows 11 或 Windows Server 2019+ x64。
 
-推荐 Windows 11 / Windows Server 2019+ x64。
+需要：
 
-必须具备：
-
-- .NET SDK 8.0 或更高版本；
-- Rust stable + Cargo（建议 rustup）；
-- Visual Studio 2022 Build Tools / MSVC C++ linker；
-- Protocol Buffers compiler：`protoc`；
-- 7-Zip，且 `7z.exe` 在 PATH；
-- PowerShell 7 或 Windows PowerShell；
-- Git。
+- .NET SDK 8.0 或更高；
+- Rust stable / Cargo，建议通过 rustup 安装；
+- Visual Studio 2022 Build Tools，含 MSVC C++ linker；
+- `protoc`；
+- 7-Zip，`7z.exe` 在 PATH；
+- Git；
+- PowerShell。
 
 检查：
 
@@ -63,33 +57,27 @@ protoc --version
 7z
 ```
 
-### 3.2 Linux
+## 4. Linux 编译环境
 
 推荐 Ubuntu 22.04/24.04 LTS。
 
-必须具备：
-
 ```bash
 sudo apt-get update
-sudo apt-get install -y protobuf-compiler pkg-config build-essential curl tar
+sudo apt-get install -y \
+  protobuf-compiler pkg-config build-essential mold curl tar
 ```
 
-另外需要：
+还需要：.NET SDK 8.0+、Rust stable、Git、PowerShell 7 (`pwsh`)。
 
-- .NET SDK 8.0+；
-- Rust stable；
-- PowerShell 7 (`pwsh`)；
-- Git。
+EasyTier 的 Linux Cargo 配置使用 `-fuse-ld=mold`，所以正式 Linux Release 构建必须存在 `mold`。
 
-Linux ARM64 交叉编译还需要：
+Linux ARM64 交叉编译另外需要：
 
 ```bash
 sudo apt-get install -y gcc-aarch64-linux-gnu
 ```
 
-## 4. 自动化编译
-
-### 4.1 Windows 一键 Release
+## 5. Windows 一键编译与发布
 
 在仓库根目录执行：
 
@@ -97,40 +85,38 @@ sudo apt-get install -y gcc-aarch64-linux-gnu
 powershell -ExecutionPolicy Bypass -File scripts/build/build-windows-release.ps1
 ```
 
-默认行为：
+脚本会依次完成：
 
-1. 编译 Host/Deployment/Manager/Windows Client；
-2. 运行 Host、Client、Diagnostics、Integration、Deployment 测试；
-3. 运行 EasyTier DHCP/Underlay 针对性 Rust 测试；
-4. Release 编译 patched `easytier-core.exe` 与 `easytier-cli.exe`；
-5. 生成 Seed / Dedicated / Client / Manager 包；
-6. 自动加入 `Packet.dll`、`wintun.dll`；
+1. 编译 Host、Deployment、Manager、Windows Client；
+2. 运行 Host/Client/Diagnostics/Integration/Deployment 测试；
+3. 运行 EasyTier DHCP 与 Underlay 针对性 Rust 测试；
+4. Release 编译 patched `easytier-core.exe`、`easytier-cli.exe`；
+5. 生成 Seed、Dedicated、Client、Manager 包；
+6. Windows 节点包加入匹配架构的 `Packet.dll` 与 `wintun.dll`；
 7. 生成 `version.txt`、`sha256.txt`、`artifact-manifest.json`；
-8. 对每个包执行完整性校验；
+8. 对全部发布包执行结构、长度和 SHA-256 校验；
 9. 生成 ZIP 归档。
 
 常用参数：
 
 ```powershell
-# 指定输出目录
+# 指定输出根目录
 scripts/build/build-windows-release.ps1 -OutputRoot publish/rc
 
-# ARM64（需要对应 MSVC/Rust target）
+# Windows ARM64
 scripts/build/build-windows-release.ps1 -RuntimeIdentifier win-arm64
 
-# 只做快速重新打包，不建议正式候选版使用
+# 仅开发期间快速重打包；正式候选版禁止跳过测试
 scripts/build/build-windows-release.ps1 -SkipTests
 ```
 
-正式候选版本禁止使用 `-SkipTests`。
-
-### 4.2 Linux 一键 Release
+## 6. Linux 一键编译与发布
 
 ```bash
 bash scripts/build/build-linux-release.sh
 ```
 
-默认完成 .NET 编译/测试、EasyTier Rust 测试和 Release 编译、三个 Linux 角色包生成、manifest 校验与 tar.gz 归档。
+脚本会完成 .NET 编译/测试、EasyTier Rust 测试、真实 Release Core/CLI 编译、Seed/Dedicated/Client 三类 Linux 包生成、manifest 校验与 `.tar.gz` 归档。
 
 常用参数：
 
@@ -139,9 +125,9 @@ bash scripts/build/build-linux-release.sh --output-root publish/rc
 bash scripts/build/build-linux-release.sh --runtime linux-arm64
 ```
 
-## 5. 标准发布目录
+## 7. 标准发布目录
 
-完成后默认输出：
+默认输出：
 
 ```text
 publish/release/
@@ -161,9 +147,9 @@ Windows Client 包额外包含：
 client-ui/EasyTierHost.Client.Windows.exe
 ```
 
-每个节点包必须包含 manifest 中声明的所有文件。不要手工向包内加入 secret、`core.toml` 或其他未登记文件，否则部署完整性检查会拒绝该包。
+节点包内不得人工增加 `network.secret`、`core.toml` 或其他未进入 manifest 的文件。部署器会拒绝未登记、多余、缺失、长度不匹配或 SHA-256 不匹配的包。
 
-## 6. GitHub 自动 Release Candidate
+## 8. GitHub 自动 Release Candidate
 
 工作流：
 
@@ -171,23 +157,26 @@ client-ui/EasyTierHost.Client.Windows.exe
 .github/workflows/release-candidate.yml
 ```
 
-支持两种方式：
+支持：
 
-1. GitHub Actions 页面手工 `Run workflow`；
-2. 推送 `rc-*` tag 自动触发，例如：
+- GitHub Actions 页面手工 `Run workflow`；
+- 推送 `rc-*` tag；
+- 开发分支中修改 `scripts/build/**`、`scripts/publish/**` 或 Release Candidate workflow 时自动验证构建链。
+
+正式候选标签示例：
 
 ```bash
 git tag rc-0.2.0-01
 git push origin rc-0.2.0-01
 ```
 
-Windows 与 Linux Runner 会分别调用仓库的一键构建脚本，使用真实 patched EasyTier Release Core 生成候选包并上传 Actions artifact。
+Windows/Linux Runner 均直接调用仓库的一键 Release 脚本，因此 CI 与本地发布使用同一入口。成功后上传 Windows/Linux candidate artifacts。
 
-候选包只表示“自动构建与自动测试通过”，不能替代四节点实机验收。
+候选 artifact 只能说明“源码、自动测试、真实 Core Release 编译、发布包校验成功”，不能代替四台独立机器的网络验收。
 
-## 7. 配置文件
+## 9. 配置规则
 
-模板位于：
+模板：
 
 ```text
 config/templates/seed.json
@@ -196,45 +185,48 @@ config/templates/dedicated.json
 config/templates/client.json
 ```
 
-基本原则：
+必须遵守：
 
-- 所有节点使用相同 `networkName` 和 network secret；
-- 非 Seed 节点的 `seedPhysicalIp` 必须填写 Seed 的真实物理 IP，不是 `10.10.0.0`；
-- Gateway 固定 `10.10.0.1`；
-- Dedicated index 仅允许 2–10；
-- Client 地址由受限 DHCP 从 `.11` 开始分配；
-- secret 使用独立 `network.secret` 文件，不把密码写进命令行或发布包。
+- 所有节点使用相同 `networkName` 与 network secret；
+- 非 Seed 节点的 `seedPhysicalIp` 填 Seed 的真实物理 IP，不得填写 `10.10.0.0`；
+- Gateway 固定 `.1`；
+- Dedicated index 仅 2–10；
+- Client 由受限 DHCP 从 `.11` 开始；
+- secret 独立存放在 `network.secret`，不进入命令行、Git 和发布包。
 
-部署前先验证：
+部署前验证：
 
 ```powershell
 ./easytier-host.exe validate C:\ProgramData\EasyTierHost\config\network.json
 ```
 
-或 Linux：
+Linux：
 
 ```bash
 ./easytier-host validate /etc/easytier-host/network.json
 ```
 
-## 8. 推荐部署顺序
-
-严格按以下顺序：
+## 10. 标准部署顺序
 
 ```text
-1. Seed
-2. Gateway (10.10.0.1)
-3. Dedicated (10.10.0.2–10)
-4. Client A
-5. Client B
-6. 其他 Client
+Seed
+ ↓
+Gateway 10.10.0.1
+ ↓
+Dedicated 10.10.0.2–10
+ ↓
+Client A
+ ↓
+Client B
+ ↓
+其他 Client
 ```
 
-每个节点必须先达到 `ready` 再部署下一层，避免把网络故障误判成安装故障。
+每一层都应先通过 `ready` 再继续下一层。
 
-## 9. Windows 本地部署
+## 11. Windows 本地安装
 
-以 Seed 为例。管理员 PowerShell：
+管理员 PowerShell，以 Seed 包为例：
 
 ```powershell
 $pkg = 'D:\EasyTierHost\publish\release\seed-windows'
@@ -253,7 +245,7 @@ Copy-Item '.\network.secret' "$config\network.secret" -Force
   -StateDirectory $state
 ```
 
-安装脚本会验证 profile、安装/更新 Windows SCM 服务、设为 LocalSystem + 自动启动，并配置失败自动重启。
+安装脚本会先校验 profile，再创建/更新 `EasyTierHost` SCM 服务，使用 LocalSystem，设置 **Automatic (Delayed Start)**、失败自动重启和 Preshutdown 清理时间。
 
 检查：
 
@@ -269,7 +261,7 @@ Get-Service EasyTierHost
 & "$install\scripts\windows\uninstall-service.ps1" -ServiceName EasyTierHost
 ```
 
-## 10. Linux 本地部署
+## 12. Linux 本地安装
 
 ```bash
 sudo mkdir -p /opt/easytier-host /etc/easytier-host /var/lib/easytier-host
@@ -277,8 +269,10 @@ sudo cp -a publish/release/seed-linux/. /opt/easytier-host/
 sudo cp network.json /etc/easytier-host/network.json
 sudo cp network.secret /etc/easytier-host/network.secret
 sudo chmod 600 /etc/easytier-host/network.secret
-sudo chmod +x /opt/easytier-host/easytier-host /opt/easytier-host/easytier-core /opt/easytier-host/easytier-cli
-sudo chmod +x /opt/easytier-host/scripts/linux/*.sh
+sudo chmod +x /opt/easytier-host/easytier-host \
+  /opt/easytier-host/easytier-core \
+  /opt/easytier-host/easytier-cli \
+  /opt/easytier-host/scripts/linux/*.sh
 
 sudo /opt/easytier-host/scripts/linux/install-service.sh \
   /opt/easytier-host \
@@ -287,15 +281,18 @@ sudo /opt/easytier-host/scripts/linux/install-service.sh \
   easytier-host
 ```
 
+systemd 使用 `Restart=always`，并在正常停止时给 Host 30 秒清理路由/NAT/DNS 与 recovery journal。
+
 检查：
 
 ```bash
 systemctl status easytier-host --no-pager
 sudo /opt/easytier-host/easytier-host ready /etc/easytier-host/network.json
-sudo /opt/easytier-host/easytier-host diagnostics /etc/easytier-host/network.json /var/lib/easytier-host
+sudo /opt/easytier-host/easytier-host diagnostics \
+  /etc/easytier-host/network.json /var/lib/easytier-host
 ```
 
-## 11. Manager 远程自动部署
+## 13. Manager 远程自动部署
 
 Windows 管理机运行：
 
@@ -303,87 +300,78 @@ Windows 管理机运行：
 publish/release/manager/EasyTierHost.Manager.exe
 ```
 
-Manager 当前支持 Seed、Gateway、Dedicated 的 Windows/Linux OpenSSH 部署。
+Manager 支持 Seed、Gateway、Dedicated 的 Windows/Linux OpenSSH 部署。
 
-远端要求：
+远端要求：SSH Server 已启用；推荐 SSH key/ssh-agent；Windows 用户具有管理员权限；Linux 使用 root 或具有部署命令所需的免交互 `sudo -n`；SSH 端口已放行。
 
-- SSH Server 已启动；
-- 推荐使用 SSH key 或 ssh-agent；
-- Windows 远端用户具有管理员权限；
-- Linux 远端为 root，或具有免交互 `sudo -n` 所需权限；
-- 22 端口或自定义 SSH 端口已放行。
-
-Manager 部署流程为事务式：
+部署事务：
 
 ```text
 校验本地 artifact manifest
-→ SSH 连通性测试
+→ SSH 测试
 → 上传私有 staging
-→ 备份旧版本/profile/secret
+→ 备份旧程序/profile/secret
 → 安装新版本
 → 启动服务
-→ 等待角色 readiness（最长约 90 秒）
+→ 最长约 90 秒等待角色 readiness
 → Ready 后提交
 ```
 
-如果安装或 readiness 失败，会尝试恢复旧程序、旧 profile、旧 secret 和旧服务。
+安装或 readiness 失败时，部署器恢复旧程序、旧 profile、旧 secret 和旧服务。
 
-## 12. Gateway 额外要求
+## 14. Gateway 平台要求
 
-Gateway 需要管理员/root 权限，因为必须配置：
+Gateway 需要管理员/root 权限，并会管理 IPv4 forwarding、NAT、DNS 53/TCP+UDP 和自有 journal。
 
-- IPv4 forwarding；
-- Windows WinNAT 或 Linux nftables NAT；
-- DNS 53/UDP + 53/TCP；
-- Gateway 自有状态 journal。
+Windows 使用 WinNAT。
 
-Linux 需要：
+Linux **优先 nftables**；如果 nft 不可用，会回退为一条带唯一 `EasyTierHost:<owner>` comment 的精确 iptables MASQUERADE 规则。删除/恢复时只删除自己拥有的对象，不清空用户 ruleset。
+
+推荐 Linux Gateway 安装：
 
 ```bash
-sudo apt-get install -y nftables
+sudo apt-get install -y nftables iptables
 ```
 
-现有主机防火墙必须允许 Overlay 到物理网卡的 forwarding，以及来自 `10.10.0.0/16` 的 DNS 访问。EasyTierHost 不会清空用户已有 nftables/iptables ruleset。
+现有主机防火墙仍必须允许 Overlay 与物理接口之间 forwarding，以及来自 `10.10.0.0/16` 的 DNS 53/TCP、53/UDP。EasyTierHost 不负责清空或接管用户已有防火墙策略。
 
-## 13. Client Internet Gateway
+## 15. Client Internet Gateway 流程
 
-Client `enableInternetGateway=true` 时，Host 的顺序为：
+`enableInternetGateway=true` 时：
 
 ```text
 捕获物理默认出口
-→ Core 使用 --underlay-source-ipv4 绑定物理 IPv4
-→ 等待 Client TUN/Core/Peer
-→ 为 Seed/Peer endpoint 建立物理 /32 保护
-→ Probe 1.1.1.1/32 与 8.8.8.8/32
+→ Core --underlay-source-ipv4 绑定物理 IPv4
+→ 等待 Client TUN / Core / Peer
+→ Seed/Peer endpoint 安装物理 /32 保护
+→ 1.1.1.1/32、8.8.8.8/32 临时 Probe
 → DNS/HTTPS Probe
 → 应用 Client DNS
-→ 提交 0.0.0.0/1 + 128.0.0.0/1 → 10.10.0.1
+→ 0.0.0.0/1 + 128.0.0.0/1 → 10.10.0.1
 → 删除临时 Probe /32
 → 周期 Reconcile
 ```
 
-原物理 `0.0.0.0/0` 保留，不通过删除物理默认路由实现网关接管。
+原物理 `0.0.0.0/0` 始终保留。物理网卡/IP/网关变化、Core 身份异常、Owned route 丢失或健康失败时，Host 先撤销自有 DNS/路由，再重启 Core 并重新捕获物理出口。
 
-物理网卡/IP/网关改变、Core 身份异常、Owned route 丢失或健康检查失败时，先撤销 EasyTierHost 自有 DNS/路由，再重启 Core 并重新捕获物理出口。
+## 16. 升级与回滚
 
-## 14. 升级与回滚
+推荐通过 Manager 执行远程升级，不要直接覆盖正在运行的安装目录。
 
-推荐使用 Manager 执行远程升级。不要直接覆盖一个正在运行的 `easytier-host` 目录。
-
-升级前至少保存：
+至少保留：
 
 ```text
 network.json
 network.secret
-当前版本号
-当前 artifact manifest
+当前 version.txt
+当前 artifact-manifest.json
 ```
 
-Gateway/Client 若存在 recovery journal，不应通过手工删除 journal 强行启动；必须让 Host 执行 recovery，确认已恢复系统网络状态后再继续升级。
+Gateway/Client 存在 recovery journal 时，不得删除 journal 强行绕过恢复。应让 Host 完成 recovery 并确认物理网络状态恢复后再升级。
 
-## 15. 发布前检查
+## 17. 发布前门禁
 
-正式候选版必须满足：
+正式候选包至少满足：
 
 ```text
 Host CI                         PASS
@@ -396,30 +384,33 @@ Linux package verification      PASS
 Release Candidate build         PASS
 ```
 
-然后才进入 `docs/FOUR-NODE-VALIDATION.md` 的 Seed + Gateway + C1 + C2 实机验收。
+Linux Privileged Network 会在隔离 network namespace 中实际测试 nftables 和强制 iptables fallback 两条路径，包括 route、`ip_forward`、NAT、Client packet forwarding、正常 rollback 与 crash journal recovery。
 
-实机验收重点：
+自动门禁完成后，再执行 `docs/FOUR-NODE-VALIDATION.md` 的真实 Seed + Gateway + C1 + C2 验收。
+
+## 18. 实机验收重点
 
 - Client ↔ Client Overlay；
 - Client → `10.10.0.1`；
-- Client 经 Gateway 访问 Internet；
+- Client 经 Gateway 上 Internet；
 - DNS TCP/UDP；
-- Seed/Peer/STUN Underlay 不递归进 Overlay；
-- P2P 不无故退化；
-- Gateway 服务停止/异常/断电恢复；
-- Client 物理网卡切换；
-- Windows/Linux 两平台；
-- 与常见 VPN/代理共存。
+- Seed/Peer/STUN/维护 DNS 的 Underlay 不递归进入 Overlay；
+- P2P 不无故退化 Relay；
+- Gateway 正常停止、异常退出和断电后的 journal recovery；
+- Client Wi-Fi/有线切换后的 Underlay 重绑定和路由恢复；
+- Windows/Linux Gateway；
+- 常见 VPN/代理共存；
+- 长时间运行和重连。
 
-## 16. 故障诊断
+## 19. 诊断
 
-统一命令：
+统一入口：
 
 ```text
 easytier-host diagnostics <network.json> [state-directory]
 ```
 
-诊断输出包括 Build/Core/Role、物理出口、Overlay、Peer、Gateway、DNS、路由、受保护 endpoint 和脱敏 recentErrors。
+输出包括 Build/Core/Role、物理出口、Overlay、Peer、Gateway、DNS、路由、受保护 endpoint 和脱敏 recentErrors。
 
 Windows 常用：
 
@@ -436,16 +427,17 @@ Linux 常用：
 ip -4 route
 ip -4 addr
 sudo nft list ruleset
+sudo iptables -t nat -S POSTROUTING
 sysctl net.ipv4.ip_forward
 systemctl status easytier-host --no-pager
 ```
 
-## 17. 发布边界
+## 20. 发布边界
 
-当前代码、自动化构建、包完整性、Windows/Linux 服务化、Linux 真实内核 NAT/route/journal CI 已建立。但自动化 CI 无法等价模拟真实跨公网的 Seed + Gateway + Client 网络。
+代码侧已经建立完整的第一版主链路、自动构建、发布包完整性、Windows/Linux 服务化、事务式远程部署以及真实 Linux 内核网络 CI。自动 CI 仍不能等价模拟真实跨公网的四台机器。
 
 因此：
 
-- 自动构建通过 = 可以生成实机候选包；
-- 四节点实机验收通过 = 才可以考虑生产放行；
-- 在完成实机验收前，Internet Gateway 保持预览状态。
+- Release Candidate 自动构建通过：可以进入实机候选阶段；
+- 四节点实机验收通过：才可考虑生产放行；
+- 实机验收完成前，Internet Gateway 继续标记为预览功能。
