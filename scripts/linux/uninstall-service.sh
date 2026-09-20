@@ -13,9 +13,36 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
+expected_state="$(realpath -m -- /var/lib/easytier-host)"
+if [[ "$state_dir" != "$expected_state" ]]; then
+  echo "refusing unexpected state directory: $state_dir (expected $expected_state)" >&2
+  exit 1
+fi
+
 if systemctl list-unit-files --type=service --no-legend "${service_name}.service" 2>/dev/null | grep -q "${service_name}.service"; then
   systemctl stop "$service_name"
 fi
+
+# Stop owned Core before recovery so it cannot rewrite virtual routes while Host restores networking.
+core_bin="$(realpath -m -- "$(dirname -- "$host")/easytier-core")"
+core_config="$(realpath -m -- "$state_dir/core.toml")"
+for proc in /proc/[0-9]*; do
+  pid="${proc#/proc/}"
+  exe="$(readlink -f "$proc/exe" 2>/dev/null || true)"
+  [[ "$exe" == "$core_bin" ]] || continue
+  cmdline="$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null || true)"
+  if [[ "$cmdline" != *"$core_config"* ]]; then
+    echo 'Another Core instance uses these program files; preserve installation.' >&2
+    exit 1
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+done
+
 "$host" recover-network "$state_dir"
 for journal in route-journal.json gateway-journal.json; do
   [[ ! -f "$state_dir/$journal" ]] || { echo 'Recovery incomplete; preserving installation' >&2; exit 1; }
@@ -38,10 +65,7 @@ systemctl daemon-reload
 systemctl reset-failed "$service_name" 2>/dev/null || true
 
 if [[ "$remove_state" == "true" ]]; then
-  case "$state_dir" in
-    /var/lib/easytier-host|/var/lib/easytier-host/*) rm -rf -- "$state_dir" ;;
-    *) echo "refusing to remove state outside /var/lib/easytier-host: $state_dir" >&2; exit 1 ;;
-  esac
+  rm -rf -- "$state_dir"
 fi
 
 echo "Uninstalled $service_name. Network profile and secret files were not deleted."

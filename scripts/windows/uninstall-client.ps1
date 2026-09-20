@@ -18,22 +18,21 @@ function Assert-Administrator {
     }
 }
 
-function Assert-OwnedPath([string] $Path, [string] $ParentRoot, [string] $LeafName) {
+function Assert-ExactOwnedPath([string] $Path, [string] $ExpectedPath) {
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
-    $root = [IO.Path]::GetFullPath($ParentRoot).TrimEnd('\') + '\'
-    if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to delete path outside ${ParentRoot}: $full"
-    }
-    if (-not ([IO.Path]::GetFileName($full)).Equals($LeafName, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to delete unexpected directory: $full"
+    $expected = [IO.Path]::GetFullPath($ExpectedPath).TrimEnd('\')
+    if (-not $full.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to delete unexpected path: $full (expected $expected)"
     }
     return $full
 }
 
 Assert-Administrator
 if (-not $PSCmdlet.ShouldProcess($InstallRoot, 'Restore physical network and uninstall virtual network')) { return }
-$InstallRoot = Assert-OwnedPath $InstallRoot $env:ProgramFiles 'EasyTierHost'
-$ConfigDirectory = Assert-OwnedPath $ConfigDirectory $env:ProgramData 'EasyTierHost'
+$InstallRoot = Assert-ExactOwnedPath $InstallRoot (Join-Path $env:ProgramFiles 'EasyTierHost')
+$ConfigDirectory = Assert-ExactOwnedPath $ConfigDirectory (Join-Path $env:ProgramData 'EasyTierHost')
+if (-not $StateDirectory) { $StateDirectory = Join-Path $ConfigDirectory 'state' }
+$StateDirectory = Assert-ExactOwnedPath $StateDirectory (Join-Path $ConfigDirectory 'state')
 
 if (-not $Force) {
     $answer = Read-Host 'Uninstall the local virtual network and delete program/config? Type Y to confirm'
@@ -47,7 +46,6 @@ $serviceUninstall = Join-Path $PSScriptRoot 'uninstall-service.ps1'
 if (-not (Test-Path -LiteralPath $serviceUninstall -PathType Leaf)) {
     throw 'Verified uninstaller missing; preserve state and installation.'
 }
-if (-not $StateDirectory) { $StateDirectory = Join-Path $ConfigDirectory 'state' }
 $hostPath = Join-Path $InstallRoot 'easytier-host.exe'
 if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
     $hostPath = Join-Path $PSScriptRoot '..\..\easytier-host.exe'

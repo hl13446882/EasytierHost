@@ -28,8 +28,21 @@ function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSec
     throw "Service '$Name' did not reach state $Expected within $TimeoutSeconds seconds."
 }
 
+function Assert-ExactOwnedPath([string] $Path, [string] $ExpectedPath) {
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $expected = [IO.Path]::GetFullPath($ExpectedPath).TrimEnd('\')
+    if (-not $full.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing unexpected path: $full (expected $expected)"
+    }
+    return $full
+}
+
 Assert-Administrator
 if (-not $PSCmdlet.ShouldProcess($ServiceName, 'Restore network and uninstall service')) { return }
+
+$expectedState = Join-Path (Join-Path $env:ProgramData 'EasyTierHost') 'state'
+$StateDirectory = Assert-ExactOwnedPath $StateDirectory $expectedState
+
 & "$env:SystemRoot\System32\sc.exe" query $ServiceName *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Service '$ServiceName' is not installed."
@@ -46,20 +59,22 @@ else {
 }
 
 if (-not (Test-Path -LiteralPath $HostPath -PathType Leaf)) { throw 'Recovery executable missing; preserve installation and state.' }
-& $HostPath recover-network $StateDirectory
-if ($LASTEXITCODE -ne 0) { throw 'Network recovery failed; service, state and files preserved.' }
-foreach ($journal in @('route-journal.json', 'gateway-journal.json')) {
-    if (Test-Path -LiteralPath (Join-Path $StateDirectory $journal)) { throw "Recovery incomplete: $journal" }
-}
 if (-not $CorePath) { $CorePath = Join-Path (Split-Path -Parent $HostPath) 'easytier-core.exe' }
 $corePath = [IO.Path]::GetFullPath($CorePath)
 $coreConfig = [IO.Path]::GetFullPath((Join-Path $StateDirectory 'core.toml'))
+# Stop owned Core before recovery so it cannot rewrite virtual routes while Host restores physical networking.
 foreach ($process in @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $corePath })) {
     if (-not $process.CommandLine -or $process.CommandLine.IndexOf($coreConfig, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw 'Another Core instance uses these program files; preserve installation.'
     }
     Stop-Process -Id $process.ProcessId -Force
     Wait-Process -Id $process.ProcessId -Timeout 30 -ErrorAction SilentlyContinue
+}
+
+& $HostPath recover-network $StateDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Network recovery failed; service, state and files preserved.' }
+foreach ($journal in @('route-journal.json', 'gateway-journal.json')) {
+    if (Test-Path -LiteralPath (Join-Path $StateDirectory $journal)) { throw "Recovery incomplete: $journal" }
 }
 # Core creates these rules outside the Host journal. Match its exact binary path and group.
 Get-NetFirewallApplicationFilter | Where-Object Program -eq $corePath | Get-NetFirewallRule |
@@ -76,14 +91,10 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 if ($RemoveState) {
-    $fullState = [IO.Path]::GetFullPath($StateDirectory)
-    $programDataRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'EasyTierHost')).TrimEnd('\') + '\'
-    if (-not $fullState.StartsWith($programDataRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to delete state outside ProgramData: $fullState"
-    }
-    if (Test-Path -LiteralPath $fullState) {
-        if ($PSCmdlet.ShouldProcess($fullState, 'Delete EasyTierHost runtime state')) {
-            Remove-Item -LiteralPath $fullState -Recurse -Force
+    # Path already verified as the exact owned state directory above.
+    if (Test-Path -LiteralPath $StateDirectory) {
+        if ($PSCmdlet.ShouldProcess($StateDirectory, 'Delete EasyTierHost runtime state')) {
+            Remove-Item -LiteralPath $StateDirectory -Recurse -Force
         }
     }
 }
