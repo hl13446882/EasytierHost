@@ -6,3 +6,4 @@ state/
 *.user
 *.secret
 tests/.configuration-*/
+.tools/

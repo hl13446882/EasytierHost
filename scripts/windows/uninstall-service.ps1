@@ -2,7 +2,9 @@
 param(
     [string] $ServiceName = "EasyTierHost",
     [string] $StateDirectory = "$env:ProgramData\EasyTierHost\state",
-    [switch] $RemoveState
+    [switch] $RemoveState,
+    [string] $HostPath = (Join-Path $PSScriptRoot '..\..\easytier-host.exe'),
+    [string] $CorePath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -27,6 +29,7 @@ function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSec
 }
 
 Assert-Administrator
+if (-not $PSCmdlet.ShouldProcess($ServiceName, 'Restore network and uninstall service')) { return }
 & "$env:SystemRoot\System32\sc.exe" query $ServiceName *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Service '$ServiceName' is not installed."
@@ -37,18 +40,44 @@ else {
         if ($PSCmdlet.ShouldProcess($ServiceName, 'Stop service and allow transactional route/DNS rollback')) {
             & "$env:SystemRoot\System32\sc.exe" stop $ServiceName | Out-Host
             if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop service '$ServiceName'." }
-            Wait-ServiceState $ServiceName 'STOPPED' 30
+            Wait-ServiceState $ServiceName 'STOPPED' 180
         }
     }
-    if ($PSCmdlet.ShouldProcess($ServiceName, 'Delete Windows service registration')) {
-        & "$env:SystemRoot\System32\sc.exe" delete $ServiceName | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "Unable to delete service '$ServiceName'." }
+}
+
+if (-not (Test-Path -LiteralPath $HostPath -PathType Leaf)) { throw 'Recovery executable missing; preserve installation and state.' }
+& $HostPath recover-network $StateDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Network recovery failed; service, state and files preserved.' }
+foreach ($journal in @('route-journal.json', 'gateway-journal.json')) {
+    if (Test-Path -LiteralPath (Join-Path $StateDirectory $journal)) { throw "Recovery incomplete: $journal" }
+}
+if (-not $CorePath) { $CorePath = Join-Path (Split-Path -Parent $HostPath) 'easytier-core.exe' }
+$corePath = [IO.Path]::GetFullPath($CorePath)
+$coreConfig = [IO.Path]::GetFullPath((Join-Path $StateDirectory 'core.toml'))
+foreach ($process in @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $corePath })) {
+    if (-not $process.CommandLine -or $process.CommandLine.IndexOf($coreConfig, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw 'Another Core instance uses these program files; preserve installation.'
     }
+    Stop-Process -Id $process.ProcessId -Force
+    Wait-Process -Id $process.ProcessId -Timeout 30 -ErrorAction SilentlyContinue
+}
+# Core creates these rules outside the Host journal. Match its exact binary path and group.
+Get-NetFirewallApplicationFilter | Where-Object Program -eq $corePath | Get-NetFirewallRule |
+    Where-Object { $_.Group -eq 'EasyTier' } | Remove-NetFirewallRule
+if (@(Get-DnsClientNrptRule | Where-Object { $_.Comment -like 'EasyTierHost:*' }).Count -gt 0) { throw 'Residual EasyTierHost DNS policy; recovery required.' }
+if (@(Get-NetRoute -AddressFamily IPv4 | Where-Object { $_.NextHop -eq '10.10.0.1' -and $_.DestinationPrefix -in @('0.0.0.0/0','0.0.0.0/1','128.0.0.0/1') }).Count -gt 0) { throw 'Residual virtual default route; recovery required.' }
+if (Get-Command Get-NetNat -ErrorAction SilentlyContinue) {
+    if (@(Get-NetNat | Where-Object Name -like 'EasyTierHost_*').Count -gt 0) { throw 'Residual gateway NAT; recovery required.' }
+}
+& "$env:SystemRoot\System32\sc.exe" query $ServiceName *> $null
+if ($LASTEXITCODE -eq 0) {
+    & "$env:SystemRoot\System32\sc.exe" delete $ServiceName | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Unable to delete service '$ServiceName'." }
 }
 
 if ($RemoveState) {
     $fullState = [IO.Path]::GetFullPath($StateDirectory)
-    $programDataRoot = [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\') + '\'
+    $programDataRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'EasyTierHost')).TrimEnd('\') + '\'
     if (-not $fullState.StartsWith($programDataRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to delete state outside ProgramData: $fullState"
     }

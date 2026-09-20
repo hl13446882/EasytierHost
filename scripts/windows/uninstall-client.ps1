@@ -3,6 +3,7 @@ param(
     [string] $InstallRoot = "$env:ProgramFiles\EasyTierHost",
     [string] $ConfigDirectory = "$env:ProgramData\EasyTierHost",
     [string] $ServiceName = 'EasyTierHost',
+    [string] $StateDirectory = '',
     [switch] $Force
 )
 
@@ -29,17 +30,8 @@ function Assert-OwnedPath([string] $Path, [string] $ParentRoot, [string] $LeafNa
     return $full
 }
 
-function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSeconds = 30) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        $text = (& "$env:SystemRoot\System32\sc.exe" query $Name 2>$null | Out-String)
-        if ($text -match "STATE\s+:\s+\d+\s+$Expected") { return }
-        Start-Sleep -Milliseconds 500
-    } while ((Get-Date) -lt $deadline)
-    throw "Service '$Name' did not reach state $Expected within $TimeoutSeconds seconds."
-}
-
 Assert-Administrator
+if (-not $PSCmdlet.ShouldProcess($InstallRoot, 'Restore physical network and uninstall virtual network')) { return }
 $InstallRoot = Assert-OwnedPath $InstallRoot $env:ProgramFiles 'EasyTierHost'
 $ConfigDirectory = Assert-OwnedPath $ConfigDirectory $env:ProgramData 'EasyTierHost'
 
@@ -51,27 +43,16 @@ if (-not $Force) {
     }
 }
 
-$serviceUninstall = Join-Path $InstallRoot 'scripts\windows\uninstall-service.ps1'
+$serviceUninstall = Join-Path $PSScriptRoot 'uninstall-service.ps1'
 if (-not (Test-Path -LiteralPath $serviceUninstall -PathType Leaf)) {
-    $serviceUninstall = Join-Path $PSScriptRoot 'uninstall-service.ps1'
+    throw 'Verified uninstaller missing; preserve state and installation.'
 }
-$stateDirectory = Join-Path $ConfigDirectory 'state'
-if (Test-Path -LiteralPath $serviceUninstall -PathType Leaf) {
-    & $serviceUninstall -ServiceName $ServiceName -StateDirectory $stateDirectory -RemoveState
+if (-not $StateDirectory) { $StateDirectory = Join-Path $ConfigDirectory 'state' }
+$hostPath = Join-Path $InstallRoot 'easytier-host.exe'
+if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
+    $hostPath = Join-Path $PSScriptRoot '..\..\easytier-host.exe'
 }
-else {
-    & "$env:SystemRoot\System32\sc.exe" query $ServiceName *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $query = (& "$env:SystemRoot\System32\sc.exe" query $ServiceName | Out-String)
-        if ($query -notmatch 'STATE\s+:\s+1\s+STOPPED') {
-            & "$env:SystemRoot\System32\sc.exe" stop $ServiceName | Out-Host
-            if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop service '$ServiceName'." }
-            Wait-ServiceState $ServiceName 'STOPPED' 35
-        }
-        & "$env:SystemRoot\System32\sc.exe" delete $ServiceName | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "Unable to delete service '$ServiceName'." }
-    }
-}
+& $serviceUninstall -ServiceName $ServiceName -StateDirectory $StateDirectory -RemoveState -HostPath $hostPath -CorePath (Join-Path $InstallRoot 'easytier-core.exe')
 
 if (Test-Path -LiteralPath $ConfigDirectory) {
     Remove-Item -LiteralPath $ConfigDirectory -Recurse -Force
@@ -83,8 +64,7 @@ if (Test-Path -LiteralPath $InstallRoot) {
     }
     catch {
         Write-Host "Service and config were removed. Delete leftover files at $InstallRoot after this window closes."
-        Write-Host 'Virtual network uninstalled.'
-        return
+        throw 'Program files remain; uninstall is incomplete.'
     }
 }
 

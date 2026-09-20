@@ -98,12 +98,12 @@ internal static class WindowsServiceHost
             case ControlPreShutdown:
                 if (_currentState is ServiceRunning or ServiceStartPending)
                 {
-                    Report(ServiceStopPending, 30_000);
+                    Report(ServiceStopPending, 180_000);
                     _stop?.Cancel();
                 }
                 return 0;
             case ControlInterrogate:
-                Report(_currentState, _currentState == ServiceStopPending ? 30_000u : 0u);
+                Report(_currentState, _currentState == ServiceStopPending ? 180_000u : 0u);
                 return 0;
             default:
                 return 0;

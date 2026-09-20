@@ -22,7 +22,7 @@ public static class Program
         {
             if (args.Length == 0 || args[0] == "help")
             {
-                Console.WriteLine("EasyTierHost 0.2.0\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  service <network.json> <state-directory>  (Windows SCM only)\n  status <network.json>\n  ready <network.json>\n  diagnostics <network.json> [state-directory]\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
+                Console.WriteLine("EasyTierHost 0.2.0\n  recover-network <state-directory>\n  validate <network.json>\n  configure <network.json> <output.toml>\n  set-secret <secret-file>  (reads a secret from stdin)\n  run <network.json> <state-directory>\n  service <network.json> <state-directory>  (Windows SCM only)\n  status <network.json>\n  ready <network.json>\n  diagnostics <network.json> [state-directory]\n  dns <network.json>\n\nClient Internet activation is experimental and only runs when enableInternetGateway=true; Host binds Core underlay sockets to the captured physical IPv4 before route takeover.");
                 return 0;
             }
             if (args[0] == "set-secret" && args.Length == 2)
@@ -33,6 +33,12 @@ public static class Program
                 if (!Directory.Exists(Path.GetDirectoryName(path))) throw new IOException("Create a private secret directory first");
                 await SecretProvider.WriteAsync(path, secret, stop.Token);
                 Console.WriteLine("Secret saved."); return 0;
+            }
+            if (args.Length == 2 && args[0] == "recover-network")
+            {
+                await RecoverNetworkAsync(Path.GetFullPath(args[1]), stop.Token);
+                Console.WriteLine("Network recovery completed; no pending recovery journals.");
+                return 0;
             }
             if (args.Length < 2) throw new HostException("ETH003", "Profile path required");
             var p = await ConfigurationStore.LoadAsync(args[1], stop.Token);
@@ -216,8 +222,7 @@ public static class Program
                 }
                 finally
                 {
-                    await iteration.CancelAsync();
-                    await manager.StopAsync(CancellationToken.None);
+                    await NetworkRecovery.StopRoleAsync(iteration, roleTask, () => manager.StopAsync(CancellationToken.None));
                 }
                 var now = DateTimeOffset.UtcNow; failures.Enqueue(now);
                 while (failures.Count > 0 && now - failures.Peek() > TimeSpan.FromMinutes(2)) failures.Dequeue();
@@ -235,8 +240,21 @@ public static class Program
         {
             await manager.StopAsync(CancellationToken.None);
             if (File.Exists(config)) File.Delete(config);
-            await ConfigurationStore.SaveAtomicAsync(Path.Combine(state, "status.json"), new { BuildId = DiagnosticsCollector.BuildId, Role = p.Role.ToString(), State = "Stopped" });
+            var pending = File.Exists(Path.Combine(state, "route-journal.json")) || File.Exists(Path.Combine(state, "gateway-journal.json"));
+            await ConfigurationStore.SaveAtomicAsync(Path.Combine(state, "status.json"), new { BuildId = DiagnosticsCollector.BuildId, Role = p.Role.ToString(), State = pending ? "RecoveryRequired" : "Stopped" });
         }
+    }
+    private static async Task RecoverNetworkAsync(string state, CancellationToken ct)
+    {
+        if (!Directory.Exists(state)) return;
+        using var lease = new FileStream(Path.Combine(state, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        var runner = new CommandRunner();
+        var routes = RouteApi(runner);
+        var client = new GatewayRouteController(routes, DnsController(runner), new GatewayProbe(), Path.Combine(state, "route-journal.json"));
+        var gateway = new GatewayCoordinator(routes, OperatingSystem.IsWindows() ? new WindowsNatManager(runner) : new LinuxNatManager(runner), state);
+        await NetworkRecovery.RestoreAsync(() => client.RecoverAsync(ct), () => gateway.RecoverAsync(ct));
+        if (File.Exists(Path.Combine(state, "route-journal.json")) || File.Exists(Path.Combine(state, "gateway-journal.json")))
+            throw new HostException("ETH302", "Recovery journals remain; uninstall refused");
     }
     private static IRouteApi RouteApi(CommandRunner runner) => OperatingSystem.IsWindows() ? new WindowsRouteApi(runner) : new LinuxRouteApi(runner);
     private static IDnsController DnsController(CommandRunner runner) => OperatingSystem.IsWindows() ? new WindowsDnsController(runner) : new LinuxDnsController(runner);

@@ -86,9 +86,11 @@ if ($exists) {
     if ($query -notmatch 'STATE\s+:\s+1\s+STOPPED') {
         & "$env:SystemRoot\System32\sc.exe" stop $ServiceName | Out-Host
         if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop existing service '$ServiceName'." }
-        Wait-ServiceState $ServiceName 'STOPPED'
+        Wait-ServiceState $ServiceName 'STOPPED' 180
     }
 }
+& $exe recover-network $StateDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Pending network recovery failed; refusing service installation.' }
 Set-ServiceBinaryPath $ServiceName $binaryPath $DisplayName
 
 Invoke-Sc description $ServiceName 'EasyTierHost owns EasyTier Core, overlay gateway/DNS and transactional route recovery.'
@@ -97,7 +99,7 @@ Invoke-Sc failureflag $ServiceName 1
 
 # Give STOP/PRESHUTDOWN enough time to remove owned DNS/routes and persist recovery state.
 $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
-New-ItemProperty -Path $serviceKey -Name PreshutdownTimeout -PropertyType DWord -Value 30000 -Force | Out-Null
+New-ItemProperty -Path $serviceKey -Name PreshutdownTimeout -PropertyType DWord -Value 180000 -Force | Out-Null
 New-ItemProperty -Path $serviceKey -Name DelayedAutoStart -PropertyType DWord -Value 1 -Force | Out-Null
 
 Invoke-Sc start $ServiceName

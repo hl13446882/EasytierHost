@@ -105,6 +105,8 @@ public sealed class GatewayRouteController(IRouteApi api, IDnsController dns, IG
     {
         if (!journal!.Owned.Any(r => RoutePlanner.SameIdentity(r, route))) return;
         if ((await api.ListAsync(ct)).Any(r => RoutePlanner.SameIdentity(r, route))) await api.DeleteAsync(route, ct);
+        if ((await api.ListAsync(ct)).Any(r => RoutePlanner.SameIdentity(r, route)))
+            throw new IOException("Owned route remains after deletion; preserve recovery journal");
         journal.Owned.RemoveAll(r => RoutePlanner.SameIdentity(r, route));
         await SaveAsync(ct);
     }

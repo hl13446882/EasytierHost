@@ -30,6 +30,8 @@ chmod 700 "$state_dir"
 "$install_root/easytier-host" validate "$profile_path"
 
 unit_path="/etc/systemd/system/${service_name}.service"
+if systemctl cat "$service_name" >/dev/null 2>&1; then systemctl stop "$service_name"; fi
+"$install_root/easytier-host" recover-network "$state_dir"
 tmp_unit="$(mktemp)"
 trap 'rm -f "$tmp_unit"' EXIT
 cat >"$tmp_unit" <<EOF
@@ -49,8 +51,8 @@ WorkingDirectory=$install_root
 Restart=always
 RestartSec=5
 UMask=0077
-TimeoutStopSec=30
-KillMode=control-group
+TimeoutStopSec=180
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

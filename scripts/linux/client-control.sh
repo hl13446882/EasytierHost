@@ -3,7 +3,7 @@ set -euo pipefail
 
 install_root="${EASYTIER_HOST_ROOT:-/opt/easytier-host}"
 profile_path="${EASYTIER_HOST_PROFILE:-/etc/easytier-host/network.json}"
-secret_path="${EASYTIER_HOST_SECRET:-/etc/easytier-host/network.secret}"
+secret_path="${EASYTIER_HOST_SECRET:-$(dirname "$profile_path")/network.secret}"
 state_dir="${EASYTIER_HOST_STATE:-/var/lib/easytier-host}"
 service_name="${EASYTIER_HOST_SERVICE:-easytier-host}"
 host="$install_root/easytier-host"
@@ -157,7 +157,10 @@ uninstall_client() {
   require_root
   local uninstaller="$install_root/scripts/linux/uninstall-service.sh"
   if [[ -f "$uninstaller" ]]; then
-    bash "$uninstaller" "$service_name" "$state_dir" true
+    bash "$uninstaller" "$service_name" "$state_dir" true "$host"
+  else
+    echo 'Verified uninstaller missing; preserve state and installation.' >&2
+    exit 1
   fi
   rm -f -- "$profile_path" "$secret_path"
   local config_dir

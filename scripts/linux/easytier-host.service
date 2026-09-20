@@ -12,8 +12,8 @@ WorkingDirectory=/opt/easytier-host
 Restart=on-failure
 RestartSec=5
 UMask=0077
-TimeoutStopSec=30
-KillMode=control-group
+TimeoutStopSec=180
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

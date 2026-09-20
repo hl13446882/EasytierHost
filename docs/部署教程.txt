@@ -129,9 +129,6 @@ Seed 页和专用服务器页也有对应的卸载按钮，只卸载该角色，
 
 第 1 步  用管理员身份打开 PowerShell。
 
-注意：下面带 powershell.exe 开头的命令，是给命令提示符或开始菜单运行用的。
-如果你窗口第一行已经是 PS C:\...，说明你已经在 PowerShell 里，不要再写 powershell.exe -NoProfile 那一段，改用文中写的 已经在 PowerShell 时 那一行。
-
 第 2 步  进入 client-windows 包。下面把 D:\EasyTierHost\publish\release\client-windows 换成你的实际路径。
 
 第 3 步  安装。网络密钥从文件读取，不要把密钥写在命令后面。
@@ -162,18 +159,12 @@ Get-Service EasyTierHost
 
 看到服务正在运行，ready 成功，诊断里 Overlay 地址为 10.10.0.11 或更大，即可认为入网成功。
 
-第 7 步  卸载本机虚拟网。先确认窗口是管理员。
-
-若窗口不是 PowerShell（例如命令提示符），执行：
+第 7 步  卸载本机虚拟网。管理员 PowerShell 执行：
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\uninstall-client.ps1"
 
-若窗口第一行已经是 PS C:\...，直接执行：
-
-& "C:\Program Files\EasyTierHost\scripts\windows\uninstall-client.ps1"
-
 按提示输入 Y 确认。脚本会先停止服务并恢复物理路由/DNS，确认无残留后再删除配置、密钥、状态和程序目录。
-恢复失败时不会假装卸载成功；见下文「十四、卸载恢复要求」。
+恢复失败时不会假装卸载成功；见 DEPLOY.txt「十四、卸载恢复要求」。
 无人值守可在命令末尾加  -Force
 
 
@@ -321,18 +312,3 @@ Seed
 4. 确认密钥和网络名称全网完全一致。
 5. 确认 Seed 物理 IP 填的是对方面能访问到的真实地址。
 6. 确认本机已有 .NET 10。安装脚本会处理，若公司网络禁止访问微软下载源，需先离线装好运行时。
-
-十四、卸载恢复要求（2026-09-19 修订）
-
-卸载成功的前提是网络恢复成功。新版本先停止服务并等待 Host 完成路由、DNS、NAT、forwarding 回滚；再运行 recover-network 处理崩溃遗留日志。日志仍在、恢复失败或检测到残留的虚拟默认路由/Host DNS/NAT 时，卸载必须报错并保留服务注册、状态和程序，不能显示卸载成功。
-
-Windows 的物理 DHCP/静态 DNS 和默认路由不应被重置：Host 删除其自有 NRPT 与路由，恢复自己改动过的 forwarding。Linux 恢复自有 resolved 链路设置和原 forwarding，删除自有 NAT。其他 VPN、DNS、防火墙和中继服务不属于清理范围。
-
-手动恢复（先停止 EasyTierHost 服务，使用修复后的 Host）：
-Windows: .\easytier-host.exe recover-network C:\ProgramData\EasyTierHost\state
-Linux: /opt/easytier-host/easytier-host recover-network /var/lib/easytier-host
-恢复命令不要求 profile 或 secret，但要求保留原状态目录。恢复成功后重新执行卸载脚本。
-
-旧卸载若已经删除状态日志，原来的自定义 DNS、转发等设置可能无法自动推断。保留现有配置，使用安装前备份或管理员确认值恢复；不要批量删除所有默认路由、重置所有 DNS 或清空防火墙。没有原始证据时不能保证精确恢复原配置。
-
-代码修复和隔离测试不能替代真实主机验收：卸载后应确认自有虚拟默认路由、NRPT/NAT 消失，物理网关与 DNS 正常，并验证物理网络解析和连通性。遇到报错不要删除恢复日志强行继续。

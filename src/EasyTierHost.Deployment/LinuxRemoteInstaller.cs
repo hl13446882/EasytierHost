@@ -53,7 +53,7 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
             if (request.Role == NodeRole.Client)
             {
                 var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, "scripts/linux/client-control.sh");
-                script = $"chmod 700 {Bash(uninstaller)} && {Bash(uninstaller)} uninstall";
+                script = $"chmod 700 {Bash(uninstaller)} && EASYTIER_HOST_ROOT={Bash(request.RemoteInstallDirectory)} EASYTIER_HOST_PROFILE={Bash(request.RemoteProfilePath)} EASYTIER_HOST_STATE={Bash(request.RemoteStateDirectory)} EASYTIER_HOST_SERVICE={Bash(request.ServiceName)} {Bash(uninstaller)} uninstall";
             }
             else
             {
@@ -86,6 +86,7 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine("set -euo pipefail");
         sb.AppendLine($"service={Bash(request.ServiceName)}");
         sb.AppendLine($"install={Bash(install)}");
+        sb.AppendLine($"state={Bash(request.RemoteStateDirectory)}");
         sb.AppendLine($"incoming={Bash(remotePackage)}");
         sb.AppendLine($"profile={Bash(profile)}");
         sb.AppendLine($"staged_profile={Bash(stagedProfile)}");
@@ -99,13 +100,15 @@ public sealed class LinuxRemoteInstaller : IServiceInstaller
         sb.AppendLine("had_profile=false; if [[ -f \"$profile\" ]]; then had_profile=true; fi");
         sb.AppendLine("had_secret=false; if [[ -f \"$secret\" ]]; then had_secret=true; fi");
         sb.AppendLine("if systemctl list-unit-files --type=service --no-legend \"${service}.service\" 2>/dev/null | grep -q \"${service}.service\"; then if [[ \"$had_install\" != true ]]; then echo 'foreign service ownership' >&2; exit 41; fi; fi");
-        sb.AppendLine("systemctl stop \"$service\" 2>/dev/null || true");
+        sb.AppendLine("if systemctl cat \"$service\" >/dev/null 2>&1; then systemctl stop \"$service\" || exit 1; fi");
+        sb.AppendLine("if [[ -f \"$state/route-journal.json\" || -f \"$state/gateway-journal.json\" ]]; then chmod +x \"$incoming/easytier-host\"; \"$incoming/easytier-host\" recover-network \"$state\"; fi");
         sb.AppendLine("rm -rf -- \"$backup_install\"; rm -f -- \"$backup_profile\" \"$backup_secret\"");
         sb.AppendLine("if [[ \"$had_install\" == true ]]; then mv -- \"$install\" \"$backup_install\"; fi");
         sb.AppendLine("if [[ \"$had_profile\" == true ]]; then mv -- \"$profile\" \"$backup_profile\"; fi");
         sb.AppendLine("if [[ \"$had_secret\" == true ]]; then mv -- \"$secret\" \"$backup_secret\"; fi");
         sb.AppendLine("rollback() {");
-        sb.AppendLine("  systemctl stop \"$service\" 2>/dev/null || true");
+        sb.AppendLine("  if systemctl cat \"$service\" >/dev/null 2>&1; then systemctl stop \"$service\" || return 1; fi");
+        sb.AppendLine("  if [[ -f \"$state/route-journal.json\" || -f \"$state/gateway-journal.json\" ]]; then \"$install/easytier-host\" recover-network \"$state\" || return 1; fi");
         sb.AppendLine("  rm -rf -- \"$install\"");
         sb.AppendLine("  if [[ \"$had_install\" == true && -d \"$backup_install\" ]]; then mv -- \"$backup_install\" \"$install\"; fi");
         sb.AppendLine("  rm -f -- \"$profile\"");

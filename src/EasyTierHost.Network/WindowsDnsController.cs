@@ -21,6 +21,6 @@ public sealed class WindowsDnsController(ICommandRunner runner) : IDnsController
     public async Task RestoreAsync(RouteSnapshot snapshot, CancellationToken ct)
     {
         var token = Token(snapshot);
-        await RunAsync($"$rules=@(Get-DnsClientNrptRule | Where-Object Comment -eq {token}); foreach ($r in $rules) {{ if (@($r.Namespace).Count -ne 1 -or @($r.Namespace)[0] -ne '.' -or @($r.NameServers).Count -ne 1 -or @($r.NameServers)[0] -ne '{OverlayAddressPlan.Gateway}') {{ throw 'Owned DNS rule changed; preserve for review' }}; Remove-DnsClientNrptRule -Name $r.Name -Force }}; Clear-DnsClientCache", ct);
+        await RunAsync($"$rules=@(Get-DnsClientNrptRule | Where-Object Comment -eq {token}); foreach ($r in $rules) {{ if (@($r.Namespace).Count -ne 1 -or @($r.Namespace)[0] -ne '.' -or @($r.NameServers).Count -ne 1 -or @($r.NameServers)[0] -ne '{OverlayAddressPlan.Gateway}') {{ throw 'Owned DNS rule changed; preserve for review' }}; Remove-DnsClientNrptRule -Name $r.Name -Force }}; if (@(Get-DnsClientNrptRule | Where-Object Comment -eq {token}).Count -gt 0) {{ throw 'DNS rollback incomplete' }}; Clear-DnsClientCache", ct);
     }
 }

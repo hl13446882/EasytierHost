@@ -53,7 +53,7 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
                 : "scripts/windows/uninstall-service.ps1";
             var uninstaller = DeploymentValidation.CombineRemote(request.RemoteInstallDirectory, uninstallerRelative);
             var script = request.Role == NodeRole.Client
-                ? $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -Force -InstallRoot {Ps(request.RemoteInstallDirectory.Replace('\\', '/'))} -ServiceName {Ps(request.ServiceName)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}"
+                ? $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -Force -InstallRoot {Ps(request.RemoteInstallDirectory.Replace('\\', '/'))} -ConfigDirectory {Ps(DeploymentValidation.RemoteDirectory(DeploymentValidation.RemoteDirectory(request.RemoteProfilePath)))} -StateDirectory {Ps(request.RemoteStateDirectory)} -ServiceName {Ps(request.ServiceName)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}"
                 : $"$ErrorActionPreference='Stop'; & {Ps(uninstaller)} -ServiceName {Ps(request.ServiceName)} -StateDirectory {Ps(request.RemoteStateDirectory)}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}";
             var result = await remote.ExecuteAsync(PowerShell(script), ct);
             return result.Success
@@ -83,6 +83,7 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         sb.AppendLine("$ErrorActionPreference='Stop'");
         sb.AppendLine($"$serviceName={Ps(request.ServiceName)}");
         sb.AppendLine($"$install={Ps(install)}");
+        sb.AppendLine($"$state={Ps(state)}");
         sb.AppendLine($"$incoming={Ps(remotePackage)}");
         sb.AppendLine($"$profile={Ps(profile)}");
         sb.AppendLine($"$stagedProfile={Ps(stagedProfile)}");
@@ -97,7 +98,8 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         sb.AppendLine("$hadSecret=Test-Path -LiteralPath $secret");
         sb.AppendLine("$existing=Get-Service -Name $serviceName -ErrorAction SilentlyContinue");
         sb.AppendLine("if ($existing -and -not $hadInstall) { throw 'Refusing to replace a service not owned by the configured install directory' }");
-        sb.AppendLine("if ($existing -and $existing.Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force; $existing.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30)) }");
+        sb.AppendLine("if ($existing -and $existing.Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force; $existing.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(180)) }");
+        sb.AppendLine("if ((Test-Path (Join-Path $state 'route-journal.json')) -or (Test-Path (Join-Path $state 'gateway-journal.json'))) { & (Join-Path $incoming 'easytier-host.exe') recover-network $state; if ($LASTEXITCODE) { throw 'Network recovery failed; preserve old installation' } }");
         sb.AppendLine("if (Test-Path -LiteralPath $backupInstall) { Remove-Item -LiteralPath $backupInstall -Recurse -Force }");
         sb.AppendLine("if (Test-Path -LiteralPath $backupProfile) { Remove-Item -LiteralPath $backupProfile -Force }");
         sb.AppendLine("if (Test-Path -LiteralPath $backupSecret) { Remove-Item -LiteralPath $backupSecret -Force }");
@@ -138,7 +140,8 @@ public sealed class WindowsRemoteInstaller : IServiceInstaller
         sb.AppendLine("}");
         sb.AppendLine("catch {");
         sb.AppendLine("  $newService=Get-Service -Name $serviceName -ErrorAction SilentlyContinue");
-        sb.AppendLine("  if ($newService -and $newService.Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue }");
+        sb.AppendLine("  if ($newService -and $newService.Status -ne 'Stopped') { Stop-Service -Name $serviceName -Force; $newService.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(180)) }");
+        sb.AppendLine("  if ((Test-Path (Join-Path $state 'route-journal.json')) -or (Test-Path (Join-Path $state 'gateway-journal.json'))) { & (Join-Path $install 'easytier-host.exe') recover-network $state; if ($LASTEXITCODE) { throw 'Network recovery failed; preserve installation and backup' } }");
         sb.AppendLine("  if (Test-Path -LiteralPath $install) { Remove-Item -LiteralPath $install -Recurse -Force }");
         sb.AppendLine("  if ($hadInstall -and (Test-Path -LiteralPath $backupInstall)) { Move-Item -LiteralPath $backupInstall -Destination $install }");
         sb.AppendLine("  if (Test-Path -LiteralPath $profile) { Remove-Item -LiteralPath $profile -Force }");

@@ -41,7 +41,12 @@ public sealed partial class LinuxNatManager(ICommandRunner runner) : IGatewayPla
 
     public async Task RestoreForwardingAsync(GatewayPlatformSnapshot s, CancellationToken ct)
     {
-        if (!s.GlobalForwardingEnabled) await runner.CheckedAsync("sysctl", ["-w", "net.ipv4.ip_forward=0"], ct);
+        if (!s.GlobalForwardingEnabled)
+        {
+            await runner.CheckedAsync("sysctl", ["-w", "net.ipv4.ip_forward=0"], ct);
+            if ((await runner.CheckedAsync("sysctl", ["-n", "net.ipv4.ip_forward"], ct)).Trim() != "0")
+                throw new IOException("Forwarding rollback incomplete");
+        }
     }
 
     public static string NatScript(GatewayPlatformSnapshot s)

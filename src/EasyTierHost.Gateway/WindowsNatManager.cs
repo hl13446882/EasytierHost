@@ -12,7 +12,6 @@ public sealed class WindowsNatManager(ICommandRunner runner) : IGatewayPlatform
     {
         // WinNAT supports a single internal prefix. Never remove another application's NAT.
         var json = await RunAsync($$"""
-            Get-NetNat | Where-Object { $_.Name -like 'EasyTierHost_*' } | ForEach-Object { Remove-NetNat -Name $_.Name -Confirm:$false }
             if (@(Get-NetNat).Count -ne 0) { throw 'Existing WinNAT configuration; refuse ownership' }
             ConvertTo-Json -Compress -Depth 5 -InputObject @(@({{physical.PhysicalInterfaceIndex}},{{overlay.Index}}) | ForEach-Object {
                 $a = @(Get-NetAdapter -InterfaceIndex $_ -IncludeHidden)[0]
@@ -37,7 +36,7 @@ public sealed class WindowsNatManager(ICommandRunner runner) : IGatewayPlatform
         foreach (var entry in s.Forwarding.Where(e => !e.Enabled))
             try
             {
-                await RunAsync($"$a=@(Get-NetAdapter -IncludeHidden | Where-Object {{ $_.InterfaceGuid.ToString() -eq {Q(entry.Identity)} }}); if ($a.Count -gt 0) {{ Set-NetIPInterface -InterfaceIndex $a[0].ifIndex -AddressFamily IPv4 -Forwarding Disabled -PolicyStore ActiveStore }}", ct);
+                await RunAsync($"$a=@(Get-NetAdapter -IncludeHidden | Where-Object {{ $_.InterfaceGuid.ToString() -eq {Q(entry.Identity)} }}); if ($a.Count -gt 0) {{ Set-NetIPInterface -InterfaceIndex $a[0].ifIndex -AddressFamily IPv4 -Forwarding Disabled -PolicyStore ActiveStore; if (@(Get-NetIPInterface -InterfaceIndex $a[0].ifIndex -AddressFamily IPv4 | Where-Object Forwarding -ne 'Disabled').Count -gt 0) {{ throw 'Forwarding rollback incomplete' }} }}", ct);
             }
             catch (Exception ex) { errors.Add(ex); }
         if (errors.Count > 0) throw new AggregateException(errors);
@@ -47,7 +46,7 @@ public sealed class WindowsNatManager(ICommandRunner runner) : IGatewayPlatform
         // Server 2019 rejects ExternalIPInterfaceAddressPrefix as error 87; internal prefix is the supported WinNAT form.
         try
         {
-            await RunAsync($"Get-NetNat | Where-Object {{ $_.Name -like 'EasyTierHost_*' }} | ForEach-Object {{ Remove-NetNat -Name $_.Name -Confirm:$false }}; if (@(Get-NetNat).Count -ne 0) {{ throw 'Existing NAT appeared' }}; New-NetNat -Name {Q(s.ResourceName)} -InternalIPInterfaceAddressPrefix '{OverlayAddressPlan.Cidr}' | Out-Null", ct);
+            await RunAsync($"if (@(Get-NetNat).Count -ne 0) {{ throw 'Existing NAT appeared; recover its journal first' }}; New-NetNat -Name {Q(s.ResourceName)} -InternalIPInterfaceAddressPrefix '{OverlayAddressPlan.Cidr}' | Out-Null", ct);
         }
         catch (Exception ex) when (ex is not HostException and not OperationCanceledException)
         {

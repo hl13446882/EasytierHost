@@ -127,7 +127,7 @@ function Stop-ExistingService([string] $Name) {
     if ($query -match 'STATE\s+:\s+1\s+STOPPED') { return }
     & "$env:SystemRoot\System32\sc.exe" stop $Name | Out-Host
     if ($LASTEXITCODE -notin 0, 1062) { throw "Unable to stop existing service '$Name'." }
-    Wait-ServiceState $Name 'STOPPED' 35
+    Wait-ServiceState $Name 'STOPPED' 180
 }
 
 function Copy-Package([string] $Source, [string] $Destination) {
@@ -188,7 +188,11 @@ if (-not (Test-Path -LiteralPath $packageHost -PathType Leaf)) {
     throw "Missing package executable: $packageHost"
 }
 
+$packageRuntime = Join-Path $PackageRoot 'scripts\windows\ensure-dotnet-runtime.ps1'
+if (Test-Path -LiteralPath $packageRuntime) { & $packageRuntime -PackageRoot $PackageRoot }
 Stop-ExistingService $ServiceName
+& $packageHost recover-network $StateDirectory
+if ($LASTEXITCODE -ne 0) { throw 'Network recovery failed; old installation and configuration preserved.' }
 Copy-Package $PackageRoot $InstallRoot
 
 $hostExe = Join-Path $InstallRoot 'easytier-host.exe'
