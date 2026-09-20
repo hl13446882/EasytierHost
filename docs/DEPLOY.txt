@@ -116,65 +116,74 @@ Seed 不提供网关和 DNS。不要指望在 Seed 上出现 10.10.0.1。
 5. 先测试连接，再点 安装虚拟网。
 6. 对方会获得 10.10.0.11 起的地址，网关和 DNS 指向 10.10.0.1。
 
-第 6 步  远程卸载普通客户端虚拟网
+第 6 步  远程卸载（按角色分开）
 
-同一页点 卸载虚拟网。
-确认后会停止远端服务，并删除远端程序和配置。
-Seed 页和专用服务器页也有对应的卸载按钮，只卸载该角色，不要用它们去卸普通用户电脑。
+不要混用按钮：
+
+1. Seed 页 → 卸载 Seed
+   远端执行 uninstall-service.ps1（或 Linux 对应脚本）。会先恢复网络日志，再删除服务；默认保留远端配置与密钥。
+2. 专用服务器页（含网关序号 1）→ 卸载
+   同样走服务卸载。网关还会回滚自有 NAT/forwarding；默认保留远端配置与密钥。
+3. 普通客户端页 → 卸载虚拟网
+   远端执行 uninstall-client.ps1（或 Linux client-control uninstall）。会恢复路由/DNS 后删除服务、配置、密钥、状态和程序。
+
+恢复失败时远端不会假装卸载成功；见「十四、卸载恢复要求」。
 
 
-六、Windows 普通电脑本地安装虚拟网
+六、Windows 普通客户端本地安装 / 卸载
 
 适用于员工电脑。不需要管理端，不需要图形客户端。
+安装脚本：install-client.ps1。卸载脚本：uninstall-client.ps1（会删程序和配置）。
+
+固定路径（不可改成相近名字）：
+程序  C:\Program Files\EasyTierHost
+配置  C:\ProgramData\EasyTierHost\config
+状态  C:\ProgramData\EasyTierHost\state
+
+注意：下面带 powershell.exe 开头的命令，是给命令提示符或开始菜单运行用的。
+如果你窗口第一行已经是 PS C:\...，说明你已经在 PowerShell 里，不要再写 powershell.exe -NoProfile 那一段，直接用 & "路径\脚本.ps1" 这种写法。
 
 第 1 步  用管理员身份打开 PowerShell。
 
-注意：下面带 powershell.exe 开头的命令，是给命令提示符或开始菜单运行用的。
-如果你窗口第一行已经是 PS C:\...，说明你已经在 PowerShell 里，不要再写 powershell.exe -NoProfile 那一段，改用文中写的 已经在 PowerShell 时 那一行。
+第 2 步  进入 client-windows 包。把 D:\EasyTierHost\publish\release\client-windows 换成实际路径。
 
-第 2 步  进入 client-windows 包。下面把 D:\EasyTierHost\publish\release\client-windows 换成你的实际路径。
-
-第 3 步  安装。网络密钥从文件读取，不要把密钥写在命令后面。
-
-把 Seed 地址换成你的 Seed 物理 IP，把密钥文件路径换成你的文件。
+第 3 步  安装。网络密钥从文件读取，不要写在命令后面。
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\EasyTierHost\publish\release\client-windows\scripts\windows\install-client.ps1 -SeedPhysicalIp 141.164.40.70 -NetworkName company-overlay -SecretFromFile C:\secure\network.secret
 
 也可以先运行脚本，再按提示输入 Seed 地址和密钥。
 
 第 4 步  等待脚本结束。它会：
-1. 检查管理员权限。
-2. 如缺少 .NET 10 则自动安装。
-3. 把程序复制到 C:\Program Files\EasyTierHost
-4. 把配置和密钥写到 C:\ProgramData\EasyTierHost\config
-5. 安装并启动名为 EasyTierHost 的服务。
-6. 等待 DHCP 分配 10.10.0.11 或更大的地址。
-7. 把默认网关和 DNS 指定为 10.10.0.1。
+1. 检查管理员权限；缺 .NET 10 则自动安装。
+2. 复制程序到 C:\Program Files\EasyTierHost。
+3. 写入 Client 配置（enableInternetGateway=true）和密钥到 C:\ProgramData\EasyTierHost\config。
+4. 安装并启动 EasyTierHost 服务。
+5. 等待 DHCP 分配 10.10.0.11 或更大地址。
+6. 由 Host 接管默认路由，并把 DNS（NRPT）指向 10.10.0.1。
 
 第 5 步  关闭安装窗口不影响虚拟网，服务会继续运行。
 
-第 6 步  本机检查。管理员 PowerShell 先进入安装目录：
+第 6 步  本机检查：
 
 cd "C:\Program Files\EasyTierHost"
 Get-Service EasyTierHost
 .\easytier-host.exe ready C:\ProgramData\EasyTierHost\config\network.json
 .\easytier-host.exe diagnostics C:\ProgramData\EasyTierHost\config\network.json C:\ProgramData\EasyTierHost\state
 
-看到服务正在运行，ready 成功，诊断里 Overlay 地址为 10.10.0.11 或更大，即可认为入网成功。
+看到服务 Running，ready 成功，诊断 Overlay 为 10.10.0.11 或更大，即可认为入网成功。
 
-第 7 步  卸载本机虚拟网。先确认窗口是管理员。
+第 7 步  卸载本机虚拟网（管理员）。
 
-若窗口不是 PowerShell（例如命令提示符），执行：
+命令提示符：
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\uninstall-client.ps1"
 
-若窗口第一行已经是 PS C:\...，直接执行：
+已在 PowerShell：
 
 & "C:\Program Files\EasyTierHost\scripts\windows\uninstall-client.ps1"
 
-按提示输入 Y 确认。脚本会先停止服务并恢复物理路由/DNS，确认无残留后再删除配置、密钥、状态和程序目录。
-恢复失败时不会假装卸载成功；见下文「十四、卸载恢复要求」。
-无人值守可在命令末尾加  -Force
+按提示输入 Y。流程：停服务 → 结束本实例 Core → recover-network → 检查无残留 NRPT/虚拟默认路由 → 删除服务、状态、配置、密钥和程序。
+恢复失败不会假装成功。无人值守加 -Force。
 
 
 七、Linux 普通电脑本地安装虚拟网
@@ -212,46 +221,77 @@ sudo /opt/easytier-host/scripts/linux/client-control.sh reconnect
 sudo /opt/easytier-host/scripts/linux/client-control.sh uninstall
 
 
-八、Windows 上手工安装 Seed 或网关
+八、Windows Seed / 网关本地安装与卸载
 
-普通用户不要走这一节。这一节给服务器管理员。
+普通用户不要走这一节；员工电脑见第六节。
+Seed 与网关共用同一套服务脚本 install-service.ps1 / uninstall-service.ps1，区别只在发布包和 network.json。
+固定路径与普通客户端相同：Program Files\EasyTierHost、ProgramData\EasyTierHost\config、ProgramData\EasyTierHost\state。
+卸载脚本要求 state 路径必须精确等于上述目录，不能用 state2、state_backup 等近似名。
 
-第 1 步  准备三样东西（都不要放进发布包）
-1. 本角色的 network.json，可从包内 config\templates 复制后修改。
-2. 一行网络密钥，保存为 network.secret。
-3. 对应发布目录：Seed 用 seed-windows，网关用 dedicated-windows。
+与普通客户端的关键差别：
+- 安装：手工准备 network.json + network.secret，再装服务；不要用 install-client.ps1。
+- 卸载：用 uninstall-service.ps1。默认只删除服务，保留 state、程序目录和 config/secret。
+- 需要清 state：卸载时加 -RemoveState（路径必须仍是 ProgramData\EasyTierHost\state）。
+- 要连程序一起删：服务卸载成功后，再手动删除 Program Files\EasyTierHost 与 ProgramData\EasyTierHost。
 
-Seed 的 json 里 Role 为 Seed，不要填 Overlay 业务地址。
-网关的 json 里 Role 为 Gateway。
-序号 2 到 10 的 json 里 Role 为 Dedicated，并填写 DedicatedIndex。
 
-所有非 Seed 节点必须填写 Seed 的真实物理 IP。
+8.1  Windows Seed
 
-第 2 步  管理员 PowerShell，把下面路径按实际修改后执行。
+准备：
+1. 发布包 seed-windows。
+2. 从包内 config\templates\seed.json 复制为 network.json；role 必须是 Seed，不要填 Overlay 业务地址，也不要填 seedPhysicalIp。
+3. 一行网络密钥保存为 network.secret（不要放进发布包）。
 
-先复制程序：
+安装（管理员 PowerShell，路径按实际修改）：
 
 New-Item -ItemType Directory -Force -Path "C:\Program Files\EasyTierHost", C:\ProgramData\EasyTierHost\config, C:\ProgramData\EasyTierHost\state
 Copy-Item -Path D:\EasyTierHost\publish\release\seed-windows\* -Destination "C:\Program Files\EasyTierHost" -Recurse -Force
 Copy-Item -Path .\network.json -Destination C:\ProgramData\EasyTierHost\config\network.json -Force
 Copy-Item -Path .\network.secret -Destination C:\ProgramData\EasyTierHost\config\network.secret -Force
+& "C:\Program Files\EasyTierHost\scripts\windows\install-service.ps1" -InstallRoot "C:\Program Files\EasyTierHost" -ProfilePath C:\ProgramData\EasyTierHost\config\network.json -StateDirectory C:\ProgramData\EasyTierHost\state
 
-再安装服务：
+脚本会：缺 .NET 10 则安装、先 recover-network、校验配置、创建 EasyTierHost（延迟自动启动、失败重启、停服等待最多约 180 秒）。
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\install-service.ps1" -InstallRoot "C:\Program Files\EasyTierHost" -ProfilePath C:\ProgramData\EasyTierHost\config\network.json -StateDirectory C:\ProgramData\EasyTierHost\state
-
-脚本会安装 .NET 10（如缺失）、校验配置、创建 EasyTierHost 服务（延迟自动启动、失败重启）。
-
-第 3 步  检查。先进入安装目录：
+检查：
 
 cd "C:\Program Files\EasyTierHost"
 Get-Service EasyTierHost
 .\easytier-host.exe ready C:\ProgramData\EasyTierHost\config\network.json
 .\easytier-host.exe diagnostics C:\ProgramData\EasyTierHost\config\network.json C:\ProgramData\EasyTierHost\state
 
-第 4 步  卸载服务（默认不删除配置和密钥）
+通过条件：服务 Running；诊断角色为 Seed；监听端口已打开；本机不占用 10.10.0.1。
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\EasyTierHost\scripts\windows\uninstall-service.ps1" -ServiceName EasyTierHost -StateDirectory C:\ProgramData\EasyTierHost\state
+卸载服务（保留配置、密钥与程序；默认也保留 state）：
+
+& "C:\Program Files\EasyTierHost\scripts\windows\uninstall-service.ps1" -ServiceName EasyTierHost -StateDirectory C:\ProgramData\EasyTierHost\state
+
+需要同时删除 state 时追加 -RemoveState。流程：停服务 → 结束本实例 Core → recover-network → 检查无残留 Host DNS/虚拟默认路由/NAT → 删除服务。
+Seed 通常不接管默认路由/DNS；若仍有 journal，必须恢复成功后才能删服务。
+
+
+8.2  Windows 网关（专用服务器序号 1）
+
+准备：
+1. 发布包 dedicated-windows（与序号 2–10 同一包，角色由 json 决定）。
+2. 从 config\templates\gateway.json 复制为 network.json；role 必须是 Gateway；seedPhysicalIp 填 Seed 真实物理 IP，不能填 10.10.0.1。
+3. network.secret 与全网一致。
+
+安装：把上一节 Copy-Item 的源目录改成 dedicated-windows，其余命令相同（同一 InstallRoot / ProfilePath / StateDirectory）。
+
+检查通过条件：诊断 GatewayReady；Overlay 为 10.10.0.1；存在名称以 EasyTierHost_ 开头的自有 NAT；10.10.0.1:53 提供 DNS。
+
+卸载：与 Seed 相同，仍用 uninstall-service.ps1。
+额外验收：卸载后无 EasyTierHost_* NAT，无 via 10.10.0.1 的虚拟默认路由，物理上网与 DNS 正常。网关改过 forwarding 时，Host 会在 recover 内回滚并校验。
+
+
+8.3  Windows 三角色对照（本地）
+
+角色            发布包              安装入口                 卸载入口                    卸载默认删除范围
+Seed            seed-windows        install-service.ps1      uninstall-service.ps1       服务；（加 -RemoveState 时）state；保留程序与 config
+网关            dedicated-windows   install-service.ps1      uninstall-service.ps1       同上，并恢复 NAT/forwarding
+普通客户端      client-windows      install-client.ps1       uninstall-client.ps1        服务、state、config、密钥、程序
+
+三者都不要用对方的安装/卸载脚本互换。
 
 
 九、Linux 上手工安装 Seed 或网关
@@ -322,17 +362,26 @@ Seed
 5. 确认 Seed 物理 IP 填的是对方面能访问到的真实地址。
 6. 确认本机已有 .NET 10。安装脚本会处理，若公司网络禁止访问微软下载源，需先离线装好运行时。
 
-十四、卸载恢复要求（2026-09-19 修订）
+十四、卸载恢复要求（2026-09-21 修订）
 
-卸载成功的前提是网络恢复成功。新版本先停止服务并等待 Host 完成路由、DNS、NAT、forwarding 回滚；再运行 recover-network 处理崩溃遗留日志。日志仍在、恢复失败或检测到残留的虚拟默认路由/Host DNS/NAT 时，卸载必须报错并保留服务注册、状态和程序，不能显示卸载成功。
+卸载成功的前提是网络恢复成功。顺序统一为：停止服务 → 结束本安装实例的 Core → recover-network → 确认无残留 journal/路由/DNS/NAT → 再删除服务（客户端再删配置与程序）。任一步失败必须保留服务注册、状态和程序，不能显示卸载成功。
 
-Windows 的物理 DHCP/静态 DNS 和默认路由不应被重置：Host 删除其自有 NRPT 与路由，恢复自己改动过的 forwarding。Linux 恢复自有 resolved 链路设置和原 forwarding，删除自有 NAT。其他 VPN、DNS、防火墙和中继服务不属于清理范围。
+按角色，卸载后应确认：
 
-手动恢复（先停止 EasyTierHost 服务，使用修复后的 Host）：
-Windows: .\easytier-host.exe recover-network C:\ProgramData\EasyTierHost\state
+1. Seed
+   服务已删除；无 route-journal.json / gateway-journal.json；本机本来就不应有 via 10.10.0.1 的默认路由或 Host NRPT。物理网络应保持可用。
+2. 网关
+   无 EasyTierHost_* NAT；无自有 forwarding 残留（Host 在恢复时已校验）；无上述 journal；物理上网与 DNS 正常。
+3. 普通 Windows 客户端
+   无 Comment 为 EasyTierHost:* 的 NRPT；无 NextHop 为 10.10.0.1 的 0.0.0.0/0、0.0.0.0/1、128.0.0.0/1；物理 DHCP/静态 DNS 未被批量重置。
+
+Windows 物理 DHCP/静态 DNS 和原默认路由不应被“网络重置”式清掉：Host 只删自有 NRPT 与自有路由，并恢复自己改过的 forwarding。Linux 只恢复自有 resolved 链路与 forwarding，删除自有 NAT。其他 VPN/DNS/防火墙不在清理范围。
+
+手动恢复（先停服务，使用修复后的 Host，state 路径必须精确）：
+Windows: & "C:\Program Files\EasyTierHost\easytier-host.exe" recover-network C:\ProgramData\EasyTierHost\state
 Linux: /opt/easytier-host/easytier-host recover-network /var/lib/easytier-host
-恢复命令不要求 profile 或 secret，但要求保留原状态目录。恢复成功后重新执行卸载脚本。
+不要求 profile 或 secret，但必须保留原状态目录。恢复成功后再重新执行对应角色的卸载脚本。
 
-旧卸载若已经删除状态日志，原来的自定义 DNS、转发等设置可能无法自动推断。保留现有配置，使用安装前备份或管理员确认值恢复；不要批量删除所有默认路由、重置所有 DNS 或清空防火墙。没有原始证据时不能保证精确恢复原配置。
+旧卸载若已删掉 journal，无法精确自动还原。保留现有配置，用安装前备份或管理员确认值处理；不要 route /f、不要重置全部 DNS、不要清空防火墙。
 
-代码修复和隔离测试不能替代真实主机验收：卸载后应确认自有虚拟默认路由、NRPT/NAT 消失，物理网关与 DNS 正常，并验证物理网络解析和连通性。遇到报错不要删除恢复日志强行继续。
+实机验收不能省略：按上表核对残留项，并验证物理解析与连通性。遇到报错不要删 journal 强行继续。

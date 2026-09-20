@@ -220,9 +220,23 @@ Client B
 
 每一层都应先通过 `ready` 再继续下一层。
 
-## 11. Windows 本地安装
+## 11. Windows 本地安装与卸载（Seed / 网关 / 普通客户端）
 
-管理员 PowerShell，以 Seed 包为例：
+三者共用固定路径：
+
+- 程序：`C:\Program Files\EasyTierHost`
+- 配置：`C:\ProgramData\EasyTierHost\config`
+- 状态：`C:\ProgramData\EasyTierHost\state`（必须精确匹配，拒绝 `state2` 等近似路径）
+
+| 角色 | 发布包 | 安装 | 卸载 | 默认删除范围 |
+| --- | --- | --- | --- | --- |
+| Seed | `seed-windows` | 手工 json + `install-service.ps1` | `uninstall-service.ps1` | 服务；可选 `-RemoveState` |
+| 网关 | `dedicated-windows` | 同上，`role=Gateway` | 同上 | 同上，并恢复 NAT/forwarding |
+| 普通客户端 | `client-windows` | `install-client.ps1` | `uninstall-client.ps1` | 服务、state、config、密钥、程序 |
+
+### Seed / 网关
+
+管理员 PowerShell，以 Seed 为例（网关把 `$pkg` 换成 `dedicated-windows`，并使用 `gateway.json` 模板）：
 
 ```powershell
 $pkg = 'D:\EasyTierHost\publish\release\seed-windows'
@@ -241,25 +255,7 @@ Copy-Item '.\network.secret' "$config\network.secret" -Force
   -StateDirectory $state
 ```
 
-安装脚本会先确认本机已有 .NET 10 运行时（缺失则从 Microsoft 官方源下载安装），再校验 profile，然后创建/更新 `EasyTierHost` SCM 服务，使用 LocalSystem，设置 **Automatic (Delayed Start)**、失败自动重启和 Preshutdown 清理时间。
-
-普通用户客户端不要手工写 profile，也不需要图形界面。解压 `client-windows` 后执行：
-
-```powershell
-$pkg = 'D:\EasyTierHost\publish\release\client-windows'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pkg\scripts\windows\install-client.ps1" `
-  -SeedPhysicalIp 141.164.40.70 `
-  -NetworkName company-overlay `
-  -SecretFromFile C:\secure\network.secret
-```
-
-`install-client.ps1` 会复制程序、写入 Client profile（`enableInternetGateway=true`）、通过 stdin 交给 `set-secret`、安装服务，并等待 DHCP 分配 `10.10.0.11+` Overlay 地址。随后 Host 把网关和 DNS 指定为 `10.10.0.1`。secret 不得出现在命令行参数中。
-
-卸载虚拟网：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramFiles\EasyTierHost\scripts\windows\uninstall-client.ps1"
-```
+安装脚本会：确认/安装 .NET 10、先 `recover-network`、校验 profile、创建 `EasyTierHost`（LocalSystem、Delayed Start、失败重启、停服等待约 180 秒）。
 
 检查：
 
@@ -269,11 +265,37 @@ Get-Service EasyTierHost
 & "$install\easytier-host.exe" diagnostics "$config\network.json" $state
 ```
 
-卸载：
+卸载（保留程序与 config；需要清 state 时加 `-RemoveState`）：
 
 ```powershell
-& "$install\scripts\windows\uninstall-service.ps1" -ServiceName EasyTierHost
+& "$install\scripts\windows\uninstall-service.ps1" `
+  -ServiceName EasyTierHost `
+  -StateDirectory $state
 ```
+
+流程：停服务 → 结束本实例 Core → `recover-network` → 残留检查 → 删服务。失败则保留安装。
+
+### 普通客户端
+
+不要手工写 profile，也不需要图形界面：
+
+```powershell
+$pkg = 'D:\EasyTierHost\publish\release\client-windows'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$pkg\scripts\windows\install-client.ps1" `
+  -SeedPhysicalIp 141.164.40.70 `
+  -NetworkName company-overlay `
+  -SecretFromFile C:\secure\network.secret
+```
+
+`install-client.ps1` 会复制程序、写入 Client profile（`enableInternetGateway=true`）、`set-secret`、安装服务，并等待 DHCP `10.10.0.11+`；随后 Host 接管默认路由与 NRPT DNS 到 `10.10.0.1`。
+
+卸载虚拟网（全量删除）：
+
+```powershell
+& "$env:ProgramFiles\EasyTierHost\scripts\windows\uninstall-client.ps1"
+```
+
+详细验收与残留检查见发布包内 `DEPLOY.txt` 第六节、第八节、第十四节。
 
 ## 12. Linux 本地安装
 
@@ -295,7 +317,7 @@ sudo /opt/easytier-host/scripts/linux/install-service.sh \
   easytier-host
 ```
 
-systemd 使用 `Restart=always`，并在正常停止时给 Host 30 秒清理路由/NAT/DNS 与 recovery journal。
+systemd 使用 `Restart=on-failure`，并在正常停止时给 Host 180 秒清理路由/NAT/DNS 与 recovery journal。
 
 普通 Linux 客户端解压 `client-linux` 到 `/opt/easytier-host` 后，不走图形界面：
 
